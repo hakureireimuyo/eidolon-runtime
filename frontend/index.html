@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Eidolon Runtime</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --accent-2: #3b82f6;
+    --user: #2563eb;
+    --bot: #1f232c;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .tag { font-size: 12px; color: var(--muted); }
+  header .spacer { flex: 1; }
+  button, .filebtn {
+    background: var(--accent-2); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer; transition: filter .15s;
+  }
+  button:hover, .filebtn:hover { filter: brightness(1.1); }
+  button.ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  input[type="file"] { display: none; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .card-panel {
+    width: 320px; border-right: 1px solid var(--border); background: var(--panel);
+    padding: 18px; overflow-y: auto;
+  }
+  .card-panel .empty { color: var(--muted); font-size: 13px; margin-top: 40px; text-align: center; }
+  .portrait {
+    width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 12px;
+    background: var(--panel-2); border: 1px solid var(--border); margin-bottom: 14px;
+  }
+  .card-panel h2 { font-size: 18px; margin: 0 0 2px; }
+  .card-panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .field { margin-bottom: 12px; }
+  .field .k { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .field .v { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted); }
+
+  .chat-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; line-height: 1.55; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.sys { align-self: center; background: transparent; color: var(--muted); font-size: 12px; border: none; }
+  .composer { display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); background: var(--panel); }
+  .composer textarea {
+    flex: 1; resize: none; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 14px;
+    font-family: inherit; max-height: 140px;
+  }
+  .composer textarea:focus { outline: none; border-color: var(--accent); }
+  .notice { padding: 8px 18px; font-size: 12px; color: var(--danger); background: #2a1416; border-bottom: 1px solid var(--border); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Eidolon Runtime</h1>
+  <span class="tag">运行时层 · 加载角色卡 + 最基础对话</span>
+  <span class="spacer"></span>
+  <label class="filebtn">加载角色卡
+    <input type="file" id="fileInput" accept=".seed,.png,.zip" />
+  </label>
+  <button class="ghost" id="resetBtn">清空对话</button>
+</header>
+
+<div id="notice" class="notice" style="display:none"></div>
+
+<main>
+  <aside class="card-panel" id="cardPanel">
+    <div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .seed / .png 文件。</div>
+  </aside>
+
+  <section class="chat-panel">
+    <div class="messages" id="messages">
+      <div class="msg sys">等待加载角色卡……</div>
+    </div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="加载角色后在此输入消息…" disabled></textarea>
+      <button id="sendBtn" disabled>发送</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const messagesEl = $("#messages");
+const inputEl = $("#input");
+const sendBtn = $("#sendBtn");
+const noticeEl = $("#notice");
+
+function notice(msg) {
+  if (!msg) { noticeEl.style.display = "none"; return; }
+  noticeEl.textContent = msg;
+  noticeEl.style.display = "block";
+}
+
+function addMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "user" ? "user" : role === "bot" ? "bot" : "sys");
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function pickPortrait(info) {
+  if (!info.assets || !info.assets.length) return null;
+  const order = ["cover", "portrait", "avatar", "fullbody"];
+  let chosen = null;
+  for (const p of order) {
+    chosen = info.assets.find((a) => (a.purpose || "").toLowerCase() === p);
+    if (chosen) break;
+  }
+  if (!chosen) chosen = info.assets.find((a) => (a.type || "").startsWith("image/"));
+  return chosen ? chosen.id : null;
+}
+
+function renderCard(info) {
+  const panel = $("#cardPanel");
+  if (!info || !info.loaded) {
+    panel.innerHTML = '<div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .seed / .png 文件。</div>';
+    return;
+  }
+  const portraitId = pickPortrait(info);
+  const portraitHtml = portraitId
+    ? `<img class="portrait" src="/api/asset/${encodeURIComponent(portraitId)}" alt="portrait" />`
+    : `<div class="portrait"></div>`;
+
+  const idParts = [];
+  if (info.gender) idParts.push(info.gender);
+  if (info.age != null) idParts.push(info.age + " 岁");
+  if (info.species) idParts.push(info.species);
+
+  const bg = info.background || {};
+  const app = info.appearance || {};
+  const per = info.personality || {};
+
+  panel.innerHTML = `
+    ${portraitHtml}
+    <h2>${escapeHtml(info.name)}</h2>
+    <div class="sub">${escapeHtml(idParts.join(" · ") || "—")}${info.nickname ? " · " + escapeHtml(info.nickname) : ""}</div>
+
+    ${field("背景", bg.summary)}
+    ${field("职业 / 所在地", [bg.occupation, bg.location].filter(Boolean).join(" · "))}
+    ${field("外貌", app.description)}
+    ${chipsField("外貌特征", app.features)}
+    ${field("性格", per.description)}
+    ${chipsField("性格特质", per.traits)}
+    ${chipsField("价值观", per.values)}
+    ${field("说话风格", (info.dialogue || {}).style)}
+  `;
+}
+
+function field(k, v) {
+  if (!v) return "";
+  return `<div class="field"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`;
+}
+function chipsField(k, arr) {
+  if (!arr || !arr.length) return "";
+  const chips = arr.map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join("");
+  return `<div class="field"><div class="k">${escapeHtml(k)}</div><div class="chips">${chips}</div></div>`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function refreshCharacter() {
+  try {
+    const res = await fetch("/api/character");
+    const info = await res.json();
+    renderCard(info);
+    if (info && info.loaded) {
+      inputEl.disabled = false; sendBtn.disabled = false;
+      messagesEl.innerHTML = "";
+      const greeting = info.greeting;
+      if (greeting) addMessage("bot", greeting);
+      else addMessage("sys", `已加载角色「${info.name}」。开始对话吧。`);
+    } else {
+      inputEl.disabled = true; sendBtn.disabled = true;
+      messagesEl.innerHTML = '<div class="msg sys">等待加载角色卡……</div>';
+    }
+  } catch (e) {
+    notice("获取角色信息失败：" + e.message);
+  }
+}
+
+$("#fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  notice("");
+  addMessage("sys", `正在加载 ${file.name} …`);
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/load", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) { notice("加载失败：" + (data.detail || res.status)); return; }
+    await refreshCharacter();
+  } catch (err) {
+    notice("加载失败：" + err.message);
+  } finally {
+    e.target.value = "";
+  }
+});
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  addMessage("user", text);
+  inputEl.value = "";
+  sendBtn.disabled = true;
+  const think = document.createElement("div");
+  think.className = "msg bot";
+  think.innerHTML = '<span class="spinner"></span>';
+  messagesEl.appendChild(think);
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text }),
+    });
+    const data = await res.json();
+    if (!res.ok) { notice("对话失败：" + (data.detail || res.status)); think.remove(); return; }
+    think.remove();
+    addMessage("bot", data.reply);
+  } catch (err) {
+    think.remove();
+    notice("对话失败：" + err.message);
+  } finally {
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+}
+
+sendBtn.addEventListener("click", send);
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+$("#resetBtn").addEventListener("click", async () => {
+  await fetch("/api/reset", { method: "POST" });
+  await refreshCharacter();
+});
+
+refreshCharacter();
+</script>
+</body>
+</html>
