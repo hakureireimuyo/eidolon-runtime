@@ -23,7 +23,14 @@ from eidolon_character.builder import build_seed
 from eidolon_character.model import Character, Dialogue, Identity
 
 from runtime.engine import RuntimeEngine, build_system_prompt
-from runtime.llm import LLMUnconfigured
+from runtime.llm import (
+    LLMError,
+    LLMUnconfigured,
+    UnsupportedCapability,
+    DeepSeekService,
+    get_service,
+    list_providers,
+)
 
 
 def _sample_character() -> Character:
@@ -69,6 +76,33 @@ class TestRuntime(unittest.TestCase):
                 eng.chat("hi")
         finally:
             os.unlink(path)
+
+
+class TestFactory(unittest.TestCase):
+    def test_default_provider_is_deepseek(self):
+        self.assertIn("deepseek", list_providers())
+        self.assertIsInstance(get_service("deepseek"), DeepSeekService)
+
+    def test_provider_selected_by_env(self):
+        import os
+
+        os.environ["EIDOLON_LLM_PROVIDER"] = "deepseek"
+        self.assertIsInstance(get_service(), DeepSeekService)
+        del os.environ["EIDOLON_LLM_PROVIDER"]
+
+    def test_unknown_provider_raises(self):
+        with self.assertRaises(LLMError):
+            get_service("not-registered-provider")
+
+    def test_multimodal_capabilities_not_supported_by_default(self):
+        svc = get_service("deepseek")
+        self.assertEqual(svc.capabilities, {"chat"})
+        with self.assertRaises(UnsupportedCapability):
+            svc.describe_image(b"")
+        with self.assertRaises(UnsupportedCapability):
+            svc.transcribe_audio(b"")
+        with self.assertRaises(UnsupportedCapability):
+            svc.synthesize_speech("hi")
 
 
 if __name__ == "__main__":

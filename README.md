@@ -35,7 +35,7 @@ eidolon-runtime/
 ├── runtime/                 # 运行时核心逻辑（与 Web 解耦，可单独测试）
 │   ├── config.py            # LLM 连接 / 数据目录（环境变量）
 │   ├── loader.py            # 角色卡加载层（复用 PersonaSeed + eidolon-character）
-│   ├── llm.py               # AI 模型调用层（OpenAI 兼容）
+│   ├── llm/                 # AI 服务层（工厂模式；默认 DeepSeek，预留语音/视觉扩展）
 │   └── engine.py            # 对话引擎（system prompt + 历史 + 对话）
 ├── backend/main.py          # FastAPI 后端：加载 / 对话 / 静态托管
 ├── frontend/index.html      # 单页对话界面（暗色，无构建步骤）
@@ -61,28 +61,38 @@ pip install -r requirements.txt
 > 因此无需预先安装这两个库即可直接复用。生产期建议改为 editable 安装：
 > `pip install -e ../PersonaSeed ../eidolon-character`。
 
-### 2. 配置 AI 模型（OpenAI 兼容）
+### 2. 配置 AI 服务（工厂模式）
 
-运行时使用 **OpenAI 兼容**客户端，可对接 OpenAI、DeepSeek、通义千问、硅基流动、Ollama 等。
+AI 调用层采用**工厂模式**（`runtime/llm/`）：按名称装配服务实例，便于后续扩展厂商与能力。
+**当前默认仅注册 DeepSeek**；语音 / 视觉等多模态能力在 `AIService` 基类上作为扩展点预留，
+默认实现直接抛出 `UnsupportedCapability`，待实现对应服务后通过工厂注册即可。
+
 通过环境变量配置（写入 `.env` 或 shell 环境）：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `EIDOLON_LLM_API_KEY` | _(空)_ | **必填**才能真实对话 |
-| `EIDOLON_LLM_BASE_URL` | `https://api.openai.com/v1` | 端点；DeepSeek 用 `https://api.deepseek.com/v1` |
-| `EIDOLON_LLM_MODEL` | `gpt-4o-mini` | 模型名；DeepSeek 用 `deepseek-chat` |
-| `EIDOLON_LLM_TEMPERATURE` | `0.8` | 创造性 |
-| `EIDOLON_LLM_MAX_TOKENS` | `1024` | 回复长度上限 |
+| `EIDOLON_LLM_PROVIDER` | `deepseek` | 选用的服务名（工厂注册键） |
+| `EIDOLON_DEEPSEEK_API_KEY` | _(空)_ | **必填**才能真实对话（兜底也可用 `EIDOLON_LLM_API_KEY`） |
+| `EIDOLON_DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek 端点 |
+| `EIDOLON_DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
+| `EIDOLON_LLM_TEMPERATURE` | `0.8` | 创造性（通用兜底） |
+| `EIDOLON_LLM_MAX_TOKENS` | `1024` | 回复长度上限（通用兜底） |
 
-示例（DeepSeek）：
+示例：
 
 ```bash
-export EIDOLON_LLM_BASE_URL=https://api.deepseek.com/v1
-export EIDOLON_LLM_API_KEY=sk-xxxx
-export EIDOLON_LLM_MODEL=deepseek-chat
+export EIDOLON_LLM_PROVIDER=deepseek
+export EIDOLON_DEEPSEEK_API_KEY=sk-xxxx
+# 可选：export EIDOLON_DEEPSEEK_MODEL=deepseek-reasoner
 ```
 
-> 未配置 Key 时，角色卡仍可正常加载与展示；发起对话会返回明确提示，不会崩溃。
+**多模态扩展（未来）**：在 `runtime/llm/` 下新增子类（如 `VoiceService` / `VisionService`），
+覆写 `transcribe_audio` / `synthesize_speech` / `describe_image`，并在 `runtime/llm/__init__.py`
+追加一行 `_default_factory.register("voice", VoiceService)` 即可，engine / 前端无需改动；
+上层可用 `service.capabilities` 探测能力以决定启用哪些 UI。messages 的 content 已支持
+OpenAI 风格多模态内容块，数据模型层面视觉能力已就绪。
+
+> 未配置 Key 时，角色卡仍可正常加载与展示；发起对话会返回明确提示（HTTP 503），不会崩溃。
 
 ### 3. 启动
 
