@@ -13,3 +13,4 @@ __pycache__/
 
 # 本地密钥
 .env
+config.toml

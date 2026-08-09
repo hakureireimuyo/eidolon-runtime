@@ -42,6 +42,8 @@ eidolon-runtime/
 ├── examples/make_sample.py  # 生成一个示例角色包 alice.seed
 ├── tests/test_runtime.py     # 最小测试（零网络）
 ├── workspace/               # 用户数据（gitignored）
+├── config.toml             # 本地 AI 配置（gitignored；可用 EIDOLON_RUNTIME_CONFIG 覆盖路径）
+├── config.example.toml     # 配置模板（入库）
 └── requirements.txt         # venv 依赖
 ```
 
@@ -86,6 +88,30 @@ export EIDOLON_DEEPSEEK_API_KEY=sk-xxxx
 # 可选：export EIDOLON_DEEPSEEK_MODEL=deepseek-reasoner
 ```
 
+#### 配置文件 + 设置页（推荐，简单实现）
+
+除环境变量外，运行时也支持把配置写入项目根目录的 `config.toml`（**已被 `.gitignore` 忽略**，不会入库）。
+仓库内提供 `config.example.toml` 作为模板，复制为 `config.toml` 后填写即可：
+
+```toml
+[llm]
+provider  = "deepseek"
+api_key   = "sk-xxxx"
+base_url  = "https://api.deepseek.com/v1"
+model     = "deepseek-chat"
+temperature = 0.8
+max_tokens  = 1024
+```
+
+更方便的是**应用内设置页**：启动后点击右上角「设置」，直接填写服务商 / API Key / 端点 / 模型 / 温度 /
+最大 Token，点保存即写入 `config.toml`（留空则清除对应字段）。底层实现：
+
+- `runtime/llm/config_file.py` —— 读取用标准库 `tomllib`，写入用极简 TOML 序列化（零第三方依赖）；
+  配置路径可用环境变量 `EIDOLON_RUNTIME_CONFIG` 覆盖（便于测试 / 多环境）。
+- `backend/main.py` —— `GET /api/settings` 读取、`PUT /api/settings` 写入与字段归一化。
+- 配置优先级（每个字段独立）：**显式参数 > 环境变量 `EIDOLON_LLM_<FIELD>` > `config.toml` `[llm]` 段 > 服务内置默认**；
+  `provider` 优先级：**显式 > 环境变量 > 配置段 > `deepseek`**。
+
 **多模态扩展（未来）**：在 `runtime/llm/` 下新增子类（如 `VoiceService` / `VisionService`），
 覆写 `transcribe_audio` / `synthesize_speech` / `describe_image`，并在 `runtime/llm/__init__.py`
 追加一行 `_default_factory.register("voice", VoiceService)` 即可，engine / 前端无需改动；
@@ -101,6 +127,7 @@ uvicorn backend.main:app --reload --port 8000
 ```
 
 打开 http://localhost:8000 ：
+0. （首次）点击右上角「设置」填入 API Key / 模型等信息并保存（写入 `config.toml`），否则对话会返回 503 提示未配置；
 1. 右上角「加载角色卡」选一个 `.seed` / `.png`（可用 `python -m examples.make_sample` 生成 `alice.seed`）；
 2. 角色设定与立绘出现在左侧，右侧出现问候语；
 3. 在输入框与角色对话。

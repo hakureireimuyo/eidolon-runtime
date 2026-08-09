@@ -1,0 +1,20 @@
+# Eidolon Runtime 配置示例（复制为 config.toml 后填写，config.toml 已被 gitignore）
+
+[llm]
+# 选用的服务（工厂注册键，当前仅 deepseek）
+provider = "deepseek"
+
+# DeepSeek API Key（必填才能真实对话）
+api_key = "sk-xxxx"
+
+# DeepSeek 兼容端点
+base_url = "https://api.deepseek.com/v1"
+
+# 模型名
+model = "deepseek-chat"
+
+# 创造性（0~1+）
+temperature = 0.8
+
+# 回复长度上限
+max_tokens = 1024

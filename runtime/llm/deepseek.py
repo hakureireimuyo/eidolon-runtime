@@ -34,8 +34,17 @@ class DeepSeekService(AIService):
             "EIDOLON_DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
         )
         self.model = model or os.environ.get("EIDOLON_DEEPSEEK_MODEL", "deepseek-chat")
-        self.temperature = float(os.environ.get("EIDOLON_LLM_TEMPERATURE", "0.8"))
-        self.max_tokens = int(os.environ.get("EIDOLON_LLM_MAX_TOKENS", "1024"))
+        # 显式传入的 temperature / max_tokens（来自 env 或 config.toml）优先于默认值。
+        self.temperature = (
+            float(temperature)
+            if temperature is not None
+            else float(os.environ.get("EIDOLON_LLM_TEMPERATURE", "0.8"))
+        )
+        self.max_tokens = (
+            int(max_tokens)
+            if max_tokens is not None
+            else int(os.environ.get("EIDOLON_LLM_MAX_TOKENS", "1024"))
+        )
 
     def chat(self, messages: list[dict], *, stream: bool = False) -> str:
         if not self.api_key:

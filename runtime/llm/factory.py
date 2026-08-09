@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 
+from .config_file import load_llm_config
 from .errors import LLMError
 
 
@@ -36,10 +37,27 @@ _default_factory = ServiceFactory()
 def get_service(provider: str | None = None) -> "AIService":  # noqa: F821
     """取得默认（或指定名称的）服务实例。
 
-    provider 优先级：显式参数 > 环境变量 EIDOLON_LLM_PROVIDER > "deepseek"。
+    配置优先级（每个字段独立）：
+        显式参数 > 环境变量 EIDOLON_LLM_<FIELD> > 配置文件 [llm] 段 > 服务内置默认
+    provider 优先级：显式参数 > 环境变量 > 配置文件 > "deepseek"。
     """
-    provider = provider or os.environ.get("EIDOLON_LLM_PROVIDER", "deepseek")
-    return _default_factory.create(provider)
+    cfg = load_llm_config()
+    provider = (
+        provider
+        or os.environ.get("EIDOLON_LLM_PROVIDER")
+        or cfg.get("provider")
+        or "deepseek"
+    )
+    if provider not in _default_factory._registry:
+        raise LLMError(
+            f"未知 AI 服务：{provider!r}。已注册：{sorted(_default_factory._registry)}"
+        )
+    kwargs: dict = {}
+    for field in ("api_key", "base_url", "model", "temperature", "max_tokens"):
+        val = os.environ.get("EIDOLON_LLM_" + field.upper()) or cfg.get(field)
+        if val is not None:
+            kwargs[field] = val
+    return _default_factory._registry[provider](**kwargs)
 
 
 def list_providers() -> list[str]:
