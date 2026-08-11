@@ -5,18 +5,18 @@ Eidolon 生态的**运行时层**第一版实现：通过 Web 可视化界面**�
 ## 在生态中的角色（边界）
 
 ```
-使用者界面层   eidolon-studio    可视化创建 / 编辑 / 分发（另立项目，GUI 叶子）
-运行时层   →  eidolon-runtime   消费包、解释角色、驱动对话  ← 本项目
-扩展层       eidolon-character  定义 character.json 格式 + 消费实现（复用）
-协议层       PersonaSeed        封装 / 索引 / 校验 / 传输（复用）
+编辑器层       可视化创建 / 编辑 / 分发（另立项目，GUI 叶子）
+引擎运行时 →   消费包、解释角色、驱动对话  ← 本项目
+资产类型层     定义角色数据格式 + 消费实现（复用）
+协议层         封装 / 索引 / 校验 / 传输（复用）
 ```
 
 Runtime 是**应用 / 服务**类项目，按 [`docs/environment-isolation.md`](../docs/environment-isolation.md) 约定**独立持有 venv**。
-它**不重新定义数据格式**（那是 eidolon-character 的职责），也**不重实现容器逻辑**（那是 PersonaSeed 的职责）——
+它**不重新定义数据格式**（那是资产类型层的职责），也**不重实现容器逻辑**（那是协议层的职责）——
 底层能力通过以下方式即插即用地复用：
 
-- `personaseed.open()` 打开 `.seed` / `.png`
-- `eidolon_character.from_package_with_assets()` 解析出类型化 `Character`
+- 协议层提供容器打开能力，消费 `.seed` / `.png` 标准包
+- 资产类型层提供解析能力，产出类型化角色对象
 - 角色身份 = 模板；对话历史 = 运行时状态，二者严格分离
 
 ## 功能（V1 最小可用闭环）
@@ -32,19 +32,19 @@ Runtime 是**应用 / 服务**类项目，按 [`docs/environment-isolation.md`](
 
 ```
 eidolon-runtime/
-├── runtime/                 # 运行时核心逻辑（与 Web 解耦，可单独测试）
-│   ├── config.py            # LLM 连接 / 数据目录（环境变量）
-│   ├── loader.py            # 角色卡加载层（复用 PersonaSeed + eidolon-character）
-│   ├── llm/                 # AI 服务层（工厂模式；默认 DeepSeek，预留语音/视觉扩展）
-│   └── engine.py            # 对话引擎（system prompt + 历史 + 对话）
-├── backend/main.py          # FastAPI 后端：加载 / 对话 / 静态托管
-├── frontend/index.html      # 单页对话界面（暗色，无构建步骤）
-├── examples/make_sample.py  # 生成一个示例角色包 alice.seed
-├── tests/test_runtime.py     # 最小测试（零网络）
-├── workspace/               # 用户数据（gitignored）
-├── config.toml             # 本地 AI 配置（gitignored；可用 EIDOLON_RUNTIME_CONFIG 覆盖路径）
-├── config.example.toml     # 配置模板（入库）
-└── requirements.txt         # venv 依赖
+├── 运行时核心               # 与 Web 解耦，可单独测试
+│   ├── 配置模块              # LLM 连接 / 数据目录（环境变量驱动）
+│   ├── 加载层                # 角色卡加载（复用协议层 + 资产类型层）
+│   ├── AI 服务层             # 工厂模式；默认 DeepSeek，预留语音/视觉扩展
+│   └── 对话引擎              # system prompt + 历史 + 对话
+├── Web 后端                  # FastAPI：加载 / 对话 / 静态托管
+├── 前端                      # 单页对话界面（暗色，无构建步骤）
+├── 示例                      # 生成示例角色包
+├── 测试                      # 最小测试（零网络）
+├── 用户数据目录              # gitignored
+├── 本地 AI 配置              # gitignored；可用环境变量覆盖路径
+├── 配置模板                  # 入库
+└── 依赖声明
 ```
 
 ## 运行
@@ -59,13 +59,12 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-> 开发期 `runtime/loader.py` 会把同级 `../PersonaSeed` 与 `../eidolon-character` 注入 `sys.path`，
-> 因此无需预先安装这两个库即可直接复用。生产期建议改为 editable 安装：
-> `pip install -e ../PersonaSeed ../eidolon-character`。
+> 开发期加载层会把协议层与资产类型层的代码注入 `sys.path`，
+> 因此无需预先安装即可直接复用。生产期建议改为 editable 安装。
 
 ### 2. 配置 AI 服务（工厂模式）
 
-AI 调用层采用**工厂模式**（`runtime/llm/`）：按名称装配服务实例，便于后续扩展厂商与能力。
+AI 调用层采用**工厂模式**（AI 服务层）：按名称装配服务实例，便于后续扩展厂商与能力。
 **当前默认仅注册 DeepSeek**；语音 / 视觉等多模态能力在 `AIService` 基类上作为扩展点预留，
 默认实现直接抛出 `UnsupportedCapability`，待实现对应服务后通过工厂注册即可。
 
@@ -106,16 +105,15 @@ max_tokens  = 1024
 更方便的是**应用内设置页**：启动后点击右上角「设置」，直接填写服务商 / API Key / 端点 / 模型 / 温度 /
 最大 Token，点保存即写入 `config.toml`（留空则清除对应字段）。底层实现：
 
-- `runtime/llm/config_file.py` —— 读取用标准库 `tomllib`，写入用极简 TOML 序列化（零第三方依赖）；
+- 配置模块 —— 读取用标准库 `tomllib`，写入用极简 TOML 序列化（零第三方依赖）；
   配置路径可用环境变量 `EIDOLON_RUNTIME_CONFIG` 覆盖（便于测试 / 多环境）。
-- `backend/main.py` —— `GET /api/settings` 读取、`PUT /api/settings` 写入与字段归一化。
+- Web 后端 —— `GET /api/settings` 读取、`PUT /api/settings` 写入与字段归一化。
 - 配置优先级（每个字段独立）：**显式参数 > 环境变量 `EIDOLON_LLM_<FIELD>` > `config.toml` `[llm]` 段 > 服务内置默认**；
   `provider` 优先级：**显式 > 环境变量 > 配置段 > `deepseek`**。
 
-**多模态扩展（未来）**：在 `runtime/llm/` 下新增子类（如 `VoiceService` / `VisionService`），
-覆写 `transcribe_audio` / `synthesize_speech` / `describe_image`，并在 `runtime/llm/__init__.py`
-追加一行 `_default_factory.register("voice", VoiceService)` 即可，engine / 前端无需改动；
-上层可用 `service.capabilities` 探测能力以决定启用哪些 UI。messages 的 content 已支持
+**多模态扩展（未来）**：在 AI 服务层下新增子类（如语音 / 视觉服务），
+覆写对应多模态方法，并在服务工厂注册表中追加一行注册即可，对话引擎 / 前端无需改动；
+上层可探测服务能力以决定启用哪些 UI。消息内容已支持
 OpenAI 风格多模态内容块，数据模型层面视觉能力已就绪。
 
 > 未配置 Key 时，角色卡仍可正常加载与展示；发起对话会返回明确提示（HTTP 503），不会崩溃。
