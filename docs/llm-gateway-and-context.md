@@ -215,9 +215,9 @@ emotion_agent._context.set_mid("emotion_state", "角色感到悲伤")
 | provider 选择、API 调用、参数传递 | LLM Gateway |
 | messages 拼接、分层布局、缓存优化 | Context Manager |
 | 对话历史管理(窗口截断) | Context Manager (ConversationBuffer) |
-| 角色卡加载、prompt 构建 | eidolon-character-service |
+| 角色卡加载、数据块解释、prompt 构建 | eidolon-character-service(运行时解释器) |
 | 资源路由(包加载) | runtime/resources/ |
 | 状态内部表示、转移函数 | 各能力子项目(eidolon-mind 等) |
 | 会话编排(谁先调谁) | RuntimeEngine |
 
-**原则:稳定部分进核心(Gateway + Manager),可变部分成扩展(各子项目)。**
+**原则:稳定部分进核心(Gateway + Manager),可变部分成扩展(各子项目)。** 资产数据块 → 内存对象的解释由配对的 X-service(运行时解释器)承担,格式层保持零依赖。

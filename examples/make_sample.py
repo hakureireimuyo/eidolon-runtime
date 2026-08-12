@@ -7,14 +7,6 @@ from __future__ import annotations
 
 import io
 import os
-import sys
-
-# 开发期把同级兄弟仓库注入 import 路径(与运行时 loader 一致)。
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-for name in ("PersonaSeed", "eidolon-character"):
-    p = os.path.join(ROOT, name)
-    if os.path.isdir(p) and p not in sys.path:
-        sys.path.insert(0, p)
 
 from eidolon_character.builder import build_seed
 from eidolon_character.model import (

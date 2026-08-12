@@ -6,8 +6,9 @@ Eidolon 生态的**运行时层**第一版实现:通过 Web 可视化界面**加
 
 ```
 编辑器层       可视化创建 / 编辑 / 分发(另立项目,GUI 叶子)
-引擎运行时 →   消费包、解释角色、驱动对话  ← 本项目
-资产类型层     定义角色数据格式 + 消费实现(复用)
+引擎运行时 →   消费包、驱动对话(组合入口)  ← 本项目
+运行时解释器   角色数据块 → 内存对象 + prompt 编译(复用 eidolon-character-service)
+资产类型层     定义角色数据格式(零依赖,复用)
 协议层         封装 / 索引 / 校验 / 传输(复用)
 ```
 
@@ -16,7 +17,7 @@ Runtime 是**应用 / 服务**类项目,按 [`docs/environment-isolation.md`](..
 底层能力通过以下方式即插即用地复用:
 
 - 协议层提供容器打开能力,消费 `.seed` / `.png` 标准包
-- 资产类型层提供解析能力,产出类型化角色对象
+- 解释器(eidolon-character-service)把角色数据块解释为类型化对象并编译 prompt,组合入口按类型标签消费
 - 角色身份 = 模板；对话历史 = 运行时状态,二者严格分离
 
 ## 功能(V1 最小可用闭环)
@@ -34,7 +35,7 @@ Runtime 是**应用 / 服务**类项目,按 [`docs/environment-isolation.md`](..
 eidolon-runtime/
 ├── 运行时核心               # 与 Web 解耦,可单独测试
 │   ├── 配置模块              # LLM 连接 / 数据目录(环境变量驱动)
-│   ├── 加载层                # 角色卡加载(复用协议层 + 资产类型层)
+│   ├── 加载层                # 角色卡加载(经 eidolon-character-service 解释器)
 │   ├── AI 服务层             # 工厂模式；默认 DeepSeek,预留语音/视觉扩展
 │   └── 对话引擎              # system prompt + 历史 + 对话
 ├── Web 后端                  # FastAPI:加载 / 对话 / 静态托管
@@ -59,8 +60,9 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-> 开发期加载层会把协议层与资产类型层的代码注入 `sys.path`,
-> 因此无需预先安装即可直接复用。生产期建议改为 editable 安装。
+> 协议层、资产类型层与解释器均通过 uv workspace 在 `pyproject.toml`
+> 中声明为正规依赖,无需 `sys.path` 注入。加载角色卡走
+> `eidolon-character-service`(解释器),组合层不直接 import 格式层。
 
 ### 2. 配置 AI 服务(工厂模式)
 
