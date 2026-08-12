@@ -1,15 +1,15 @@
-"""资源注册表：类型标签 -> 处理器 的可扩展映射。
+"""资源注册表:类型标签 -> 处理器 的可扩展映射。
 
-内核对"有哪些资源类型"完全无知；一切认知都来自注册表。三种注册方式：
+内核对"有哪些资源类型"完全无知；一切认知都来自注册表。三种注册方式:
 
 1. **写代码**——`@registry.handler("application/x-eidolon-world", versions="^1.0")`
    装饰一个函数或 handler 类。
 2. **写声明**——`registry.define("application/x-eidolon-quest", required=("title",))`
-   运行时凭空定义一个新类型，不需要任何 Python 类。
+   运行时凭空定义一个新类型,不需要任何 Python 类。
 3. **装插件**——`registry.discover()` 扫描 `eidolon.resources` entry point 或
-   直接 `registry.install(module)`，第三方包即插即用。
+   直接 `registry.install(module)`,第三方包即插即用。
 
-配套的迁移注册（`@registry.migration`）让同一类型的历史版本能自动升级到当前
+配套的迁移注册(`@registry.migration`)让同一类型的历史版本能自动升级到当前
 handler 支持的范围内。
 """
 
@@ -29,7 +29,7 @@ from .versioning import MigrationGraph
 
 
 class ResourceRegistry:
-    """处理器与迁移边的容器。可创建多个实例以实现隔离（测试 / 沙箱）。"""
+    """处理器与迁移边的容器。可创建多个实例以实现隔离(测试 / 沙箱)。"""
 
     def __init__(self, name: str = "default") -> None:
         self.name = name
@@ -42,9 +42,9 @@ class ResourceRegistry:
     # 注册
     # ------------------------------------------------------------------
     def register(self, handler: ResourceHandler) -> ResourceHandler:
-        """注册一个 handler 实例。同特异度时后注册者优先（便于覆盖内置行为）。"""
+        """注册一个 handler 实例。同特异度时后注册者优先(便于覆盖内置行为)。"""
         if not isinstance(handler, ResourceHandler):
-            raise TypeError(f"handler 必须是 ResourceHandler，收到 {type(handler)!r}")
+            raise TypeError(f"handler 必须是 ResourceHandler,收到 {type(handler)!r}")
         self._seq += 1
         self._handlers.append((self._seq, handler))
         self._cache.clear()
@@ -65,7 +65,7 @@ class ResourceRegistry:
         decoder: Optional[Callable[..., Any]] = None,
         encoder: Optional[Callable[..., Any]] = None,
     ):
-        """装饰器：把函数或 handler 类注册为处理器。
+        """装饰器:把函数或 handler 类注册为处理器。
 
             @registry.handler("application/x-eidolon-world", versions="^1.0")
             def load_world(data, descriptor, context):
@@ -114,7 +114,7 @@ class ResourceRegistry:
         description: str = "",
         strict: bool = False,
     ) -> SchemaHandler:
-        """运行时动态定义一个资源类型（无需编写 handler 类）。"""
+        """运行时动态定义一个资源类型(无需编写 handler 类)。"""
         handler = SchemaHandler(
             type_value,
             version=version,
@@ -136,7 +136,7 @@ class ResourceRegistry:
         to: Any,
         note: str = "",
     ):
-        """装饰器：注册一条版本迁移边。
+        """装饰器:注册一条版本迁移边。
 
             @registry.migration("application/x-eidolon-world", frm="<1.0", to="1.0")
             def upgrade(data, context):
@@ -159,7 +159,7 @@ class ResourceRegistry:
     # 解析
     # ------------------------------------------------------------------
     def resolve(self, type_value: str) -> Optional[tuple[ResourceHandler, int]]:
-        """按特异度选出最合适的 handler，返回 (handler, 分数)。"""
+        """按特异度选出最合适的 handler,返回 (handler, 分数)。"""
         key = typespec.normalize(type_value)
         if key in self._cache:
             return self._cache[key]
@@ -178,7 +178,7 @@ class ResourceRegistry:
         return best
 
     def supports(self, type_value: str) -> bool:
-        """是否存在**专用**（非全局兜底）handler。"""
+        """是否存在**专用**(非全局兜底)handler。"""
         found = self.resolve(type_value)
         return bool(found and found[1] > 0)
 
@@ -186,7 +186,7 @@ class ResourceRegistry:
     # 插件发现
     # ------------------------------------------------------------------
     def install(self, target: Any) -> list[str]:
-        """安装一个扩展：模块（调用其 `register(registry)`）或可调用对象。"""
+        """安装一个扩展:模块(调用其 `register(registry)`)或可调用对象。"""
         installed: list[str] = []
         hook = getattr(target, "register", target)
         if callable(hook):
@@ -235,7 +235,7 @@ class ResourceRegistry:
         }
 
     def clone(self, name: Optional[str] = None) -> "ResourceRegistry":
-        """复制一份（测试中隔离改动，不污染全局注册表）。"""
+        """复制一份(测试中隔离改动,不污染全局注册表)。"""
         clone = ResourceRegistry(name or f"{self.name}-clone")
         clone._handlers = list(self._handlers)
         clone._seq = self._seq
@@ -252,7 +252,7 @@ class ResourceRegistry:
         self._seq = 0
 
 
-# 全局默认注册表（内置 handler 在 builtin.install_builtins 中装入）。
+# 全局默认注册表(内置 handler 在 builtin.install_builtins 中装入)。
 registry = ResourceRegistry("default")
 
 

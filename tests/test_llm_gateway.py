@@ -1,10 +1,10 @@
-"""LLM Gateway 抽象层测试（零网络）。
+"""LLM Gateway 抽象层测试(零网络)。
 
-使用 mock service 验证：
+使用 mock service 验证:
 - LLMRequest / LLMResponse 类型正确性
-- Gateway 封装 provider 差异，engine 只需输入→输出
+- Gateway 封装 provider 差异,engine 只需输入→输出
 - 注入式 service 可用于测试
-- per-request 参数传递（温度覆盖）
+- per-request 参数传递(温度覆盖)
 """
 from __future__ import annotations
 

@@ -1,12 +1,12 @@
-"""ConversationBuffer —— 对话缓冲区（高频层）。
+"""ConversationBuffer —— 对话缓冲区(高频层)。
 
-管理 recent messages，支持：
-- 追加新消息（user / assistant）
-- 窗口截断（只保留最近 N 轮，避免无限增长）
+管理 recent messages,支持:
+- 追加新消息(user / assistant)
+- 窗口截断(只保留最近 N 轮,避免无限增长)
 - 导出为 OpenAI 风格 messages 列表
 
-对齐 docs/state-and-context.md §4 的"高频层"设计：
-"每轮对话更新，局部更新，不重建全部"。
+对齐 docs/state-and-context.md §4 的"高频层"设计:
+"每轮对话更新,局部更新,不重建全部"。
 """
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ class ConversationTurn:
 class ConversationBuffer:
     """对话历史缓冲区。
 
-    max_turns: 保留的最大轮数（1 轮 = 1 条消息）。
+    max_turns: 保留的最大轮数(1 轮 = 1 条消息)。
     超出时自动从最旧的消息开始截断。
-    设为 0 表示无限制（不推荐生产环境使用）。
+    设为 0 表示无限制(不推荐生产环境使用)。
     """
 
     def __init__(self, max_turns: int = 40) -> None:
@@ -45,9 +45,9 @@ class ConversationBuffer:
         self._evict()
 
     def add(self, role: str, content: str) -> ConversationTurn:
-        """追加一条消息，返回创建的 turn。"""
+        """追加一条消息,返回创建的 turn。"""
         if role not in ("user", "assistant", "system"):
-            raise ValueError(f"role 必须是 user/assistant/system，得到 {role!r}")
+            raise ValueError(f"role 必须是 user/assistant/system,得到 {role!r}")
         turn = ConversationTurn(role=role, content=content)
         self._turns.append(turn)
         self._evict()
@@ -68,7 +68,7 @@ class ConversationBuffer:
         self._turns.clear()
 
     def _evict(self) -> None:
-        """如果超过 max_turns，从最旧的消息开始截断。"""
+        """如果超过 max_turns,从最旧的消息开始截断。"""
         if self._max_turns > 0 and len(self._turns) > self._max_turns:
             excess = len(self._turns) - self._max_turns
             self._turns = self._turns[excess:]

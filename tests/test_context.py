@@ -1,10 +1,10 @@
-"""Context Management 抽象层测试（零网络）。
+"""Context Management 抽象层测试(零网络)。
 
-覆盖：
-- ContextLayer 层级排序（static → high）
+覆盖:
+- ContextLayer 层级排序(static → high)
 - ContextSegment / ContextIR 分组、替换、查询
 - ConversationBuffer 追加、截断、导出
-- ContextCompiler 编译为 messages（缓存友好布局）
+- ContextCompiler 编译为 messages(缓存友好布局)
 - ContextManager 分层管理 + 增量更新 + 编译
 """
 from __future__ import annotations
@@ -90,7 +90,7 @@ class TestContextIR(unittest.TestCase):
         self.assertEqual(len(groups[ContextLayer.LOW]), 0)
 
     def test_sorted_segments_stable_order(self):
-        """按稳定性排序，同层保持插入顺序。"""
+        """按稳定性排序,同层保持插入顺序。"""
         ir = ContextIR()
         ir.add(ContextSegment(text="h2", layer=ContextLayer.HIGH, tag="h2"))
         ir.add(ContextSegment(text="s1", layer=ContextLayer.STATIC, tag="s1"))

@@ -1,17 +1,17 @@
-"""资源处理器协议：把字节解释成领域对象的唯一扩展点。
+"""资源处理器协议:把字节解释成领域对象的唯一扩展点。
 
-Handler 是运行时**唯一**知道"某类数据是什么意思"的地方；内核（registry /
-router / space）始终领域无知（见 docs/runtime-core-design.md §1）。
+Handler 是运行时**唯一**知道"某类数据是什么意思"的地方；内核(registry /
+router / space)始终领域无知(见 docs/runtime-core-design.md §1)。
 
-一个 handler 需要回答四件事：
+一个 handler 需要回答四件事:
 
-    type_patterns  我认领哪些类型标签（支持通配）
-    versions       我支持哪些 Schema 版本（版本范围表达式）
+    type_patterns  我认领哪些类型标签(支持通配)
+    versions       我支持哪些 Schema 版本(版本范围表达式)
     decode/load    字节 -> 中间结构 -> 领域对象
-    encode         领域对象 -> 字节（供动态创建与写回包）
+    encode         领域对象 -> 字节(供动态创建与写回包)
 
-三个现成基类：`JSONHandler`（JSON 编解码）、`FunctionHandler`（把一个函数变成
-handler）、`SchemaHandler`（只给出字段声明就能动态生成 handler，不必写代码）。
+三个现成基类:`JSONHandler`(JSON 编解码)、`FunctionHandler`(把一个函数变成
+handler)、`SchemaHandler`(只给出字段声明就能动态生成 handler,不必写代码)。
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ class ResourceHandler:
     versions: str = "*"
     name: str = ""
     description: str = ""
-    # 数据版本高于 versions 上界时，是否允许"前向兼容"加载（忽略未知字段）
+    # 数据版本高于 versions 上界时,是否允许"前向兼容"加载(忽略未知字段)
     forward_compatible: bool = True
-    # 通用处理器（只做格式装载、不赋予领域语义），产出的记录标记为 generic
+    # 通用处理器(只做格式装载、不赋予领域语义),产出的记录标记为 generic
     generic: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
@@ -55,7 +55,7 @@ class ResourceHandler:
 
     # ---- 元信息 ----
     def default_version(self) -> Optional[str]:
-        """动态创建该类型资源时写入的版本号（取支持范围下界）。"""
+        """动态创建该类型资源时写入的版本号(取支持范围下界)。"""
         from .versioning import VersionRange
 
         lower = VersionRange.parse(self.versions).lower
@@ -76,7 +76,7 @@ class ResourceHandler:
 
 
 class RawHandler(ResourceHandler):
-    """全局兜底：任何无法解释的字节都能被装载，不丢数据。"""
+    """全局兜底:任何无法解释的字节都能被装载,不丢数据。"""
 
     type_patterns = ("*/*",)
     name = "raw"
@@ -85,7 +85,7 @@ class RawHandler(ResourceHandler):
 
 
 class TextHandler(ResourceHandler):
-    """文本类型：解码为 str。"""
+    """文本类型:解码为 str。"""
 
     type_patterns = ("text/*",)
     name = "text"
@@ -104,7 +104,7 @@ class JSONHandler(ResourceHandler):
 
     type_patterns = ("application/json", "*/*+json")
     name = "json"
-    description = "通用 JSON 资源（自适应结构）"
+    description = "通用 JSON 资源(自适应结构)"
     generic = True
 
     def decode(self, raw: bytes, descriptor: Any) -> Any:
@@ -208,7 +208,7 @@ class SchemaHandler(JSONHandler):
             defaults={"regions": []},
         )
 
-    产物是 `DynamicResource`：声明过的字段有默认值与校验，未声明的字段照样保留。
+    产物是 `DynamicResource`:声明过的字段有默认值与校验,未声明的字段照样保留。
     """
 
     generic = False
@@ -248,12 +248,12 @@ class SchemaHandler(JSONHandler):
         missing = [k for k in self.required if k not in payload]
         if missing and self.strict:
             raise SchemaValidationError(
-                f"{self.type_value} 缺少必填字段：{', '.join(missing)}"
+                f"{self.type_value} 缺少必填字段:{', '.join(missing)}"
             )
         merged = {**self.defaults, **payload}
         resource = DynamicResource(merged)
         if missing:
-            # 非严格模式：补空占位，保证下游访问不 KeyError
+            # 非严格模式:补空占位,保证下游访问不 KeyError
             for key in missing:
                 if key not in merged:
                     resource[key] = None

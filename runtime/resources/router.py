@@ -1,15 +1,15 @@
-"""资源路由器：描述符进，加载记录出。
+"""资源路由器:描述符进,加载记录出。
 
 路由 = **按类型标签选 handler** + **按版本决定兼容策略** + **失败逐级降级**。
 
-加载流水线（任何一步出问题都只降级、不抛错）：
+加载流水线(任何一步出问题都只降级、不抛错):
 
     字节 -> [选 handler] -> [decode] -> [版本裁决] -> [load] -> ResourceRecord
                  ↓失败          ↓失败        ↓无迁移路径    ↓失败
               通用兜底      原始字节      前向/降级加载   通用动态资源
 
-这条"永不中断"的规则很关键：一个包里有 20 份数据，其中 1 份来自未来版本的
-未知模块，运行时依旧要能把另外 19 份跑起来，并把第 20 份原样保留（写回不丢）。
+这条"永不中断"的规则很关键:一个包里有 20 份数据,其中 1 份来自未来版本的
+未知模块,运行时依旧要能把另外 19 份跑起来,并把第 20 份原样保留(写回不丢)。
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class RouteDecision:
 
 
 class ResourceRouter:
-    """无状态路由器：可安全并发复用同一实例。"""
+    """无状态路由器:可安全并发复用同一实例。"""
 
     def __init__(self, reg: Optional[ResourceRegistry] = None) -> None:
         self.registry = reg or default_registry
@@ -61,7 +61,7 @@ class ResourceRouter:
         handler, score = found
         if score == 0:
             return RouteDecision(handler, score, "仅命中全局兜底处理器")
-        return RouteDecision(handler, score, f"命中 {handler.name}（特异度 {score}）")
+        return RouteDecision(handler, score, f"命中 {handler.name}(特异度 {score})")
 
     # ------------------------------------------------------------------
     def load(
@@ -69,7 +69,7 @@ class ResourceRouter:
         descriptor: ResourceDescriptor,
         context: Optional[LoadContext] = None,
     ) -> ResourceRecord:
-        """加载一份资源，任何情况下都返回记录。"""
+        """加载一份资源,任何情况下都返回记录。"""
         context = context or LoadContext()
         record = ResourceRecord(
             descriptor=descriptor,
@@ -82,7 +82,7 @@ class ResourceRouter:
             raw = descriptor.read()
         except Exception as exc:  # noqa: BLE001
             record.status = STATUS_ERROR
-            record.note(f"读取字节失败：{exc}")
+            record.note(f"读取字节失败:{exc}")
             return record
         record.raw = raw
 
@@ -104,7 +104,7 @@ class ResourceRouter:
         except Exception as exc:  # noqa: BLE001
             record.status = STATUS_DEGRADED
             record.value = _generic_value(raw)
-            record.note(f"{handler.name} 解码失败，退回原始数据：{exc}")
+            record.note(f"{handler.name} 解码失败,退回原始数据:{exc}")
             return record
 
         # 4) 版本裁决
@@ -124,20 +124,20 @@ class ResourceRouter:
                     record.effective_version = str(plan[-1].to_version)
                     status = STATUS_MIGRATED
                 except Exception as exc:  # noqa: BLE001
-                    record.note(f"迁移链执行失败：{exc}")
+                    record.note(f"迁移链执行失败:{exc}")
                     status = STATUS_DEGRADED
             else:
                 upper = supported.upper
                 if upper is not None and source > upper and handler.forward_compatible:
                     status = STATUS_FORWARD
                     record.note(
-                        f"数据版本 {source} 高于 {handler.name} 支持的 {supported}，"
-                        "按前向兼容加载（未知字段原样保留）"
+                        f"数据版本 {source} 高于 {handler.name} 支持的 {supported},"
+                        "按前向兼容加载(未知字段原样保留)"
                     )
                 else:
                     status = STATUS_DEGRADED
                     record.note(
-                        f"数据版本 {source} 不在 {handler.name} 支持的 {supported} 内，"
+                        f"数据版本 {source} 不在 {handler.name} 支持的 {supported} 内,"
                         "且无迁移路径"
                     )
 
@@ -148,12 +148,12 @@ class ResourceRouter:
         except Exception as exc:  # noqa: BLE001
             record.status = STATUS_DEGRADED
             record.value = wrap(data) if isinstance(data, (dict, list)) else data
-            record.note(f"{handler.name} 解释失败，退回通用数据：{exc}")
+            record.note(f"{handler.name} 解释失败,退回通用数据:{exc}")
         return record
 
     # ------------------------------------------------------------------
     def encode(self, record: ResourceRecord) -> bytes:
-        """把记录序列化回字节（写回包 / 导出时使用）。"""
+        """把记录序列化回字节(写回包 / 导出时使用)。"""
         found = self.registry.resolve(record.type)
         if found is not None:
             handler, _ = found
@@ -167,7 +167,7 @@ class ResourceRouter:
 
 
 def _generic_value(raw: bytes) -> Any:
-    """无 handler 可用时的通用值：能解析成 JSON 就给动态资源，否则给字节。"""
+    """无 handler 可用时的通用值:能解析成 JSON 就给动态资源,否则给字节。"""
     import json
 
     try:
@@ -198,5 +198,5 @@ def _fallback_encode(value: Any) -> bytes:
         return repr(value).encode("utf-8")
 
 
-# 默认路由器（绑定全局注册表）
+# 默认路由器(绑定全局注册表)
 router = ResourceRouter()

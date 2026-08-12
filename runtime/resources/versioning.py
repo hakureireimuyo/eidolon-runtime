@@ -1,14 +1,14 @@
-﻿"""版本兼容底座：语义化版本、范围表达式与迁移图。
+﻿"""版本兼容底座:语义化版本、范围表达式与迁移图。
 
-Cartridge 约定：容器 `manifest.version` 是整数（由协议层自行迁移），
+Cartridge 约定:容器 `manifest.version` 是整数(由协议层自行迁移),
 数据块 `entry.version` 是**字符串**——模块自身的 Schema 版本。本模块只处理后者。
 
-三条兼容策略（由 router 依次尝试，任何一条命中都不会让整包加载失败）：
+三条兼容策略(由 router 依次尝试,任何一条命中都不会让整包加载失败):
 
-1. **命中范围**：数据版本落在 handler 声明的支持范围内，直接加载。
-2. **迁移链**：注册过 migration 时，用 BFS 找一条最短升级路径，逐跳改写数据。
-3. **宽容降级**：找不到路径时——数据比 handler 新则按"前向兼容"加载
-   （未知字段原样保留），数据比 handler 旧则按"降级"加载；两者都失败才退回
+1. **命中范围**:数据版本落在 handler 声明的支持范围内,直接加载。
+2. **迁移链**:注册过 migration 时,用 BFS 找一条最短升级路径,逐跳改写数据。
+3. **宽容降级**:找不到路径时——数据比 handler 新则按"前向兼容"加载
+   (未知字段原样保留),数据比 handler 旧则按"降级"加载；两者都失败才退回
    通用动态资源。老运行时读新数据、新运行时读老数据都不会崩。
 """
 
@@ -93,8 +93,8 @@ _CLAUSE_RE = re.compile(r"^(>=|<=|==|!=|>|<|\^|~)?\s*(.+)$")
 class VersionRange:
     """版本范围表达式。
 
-    支持：`*` / `1.2.3` / `>=1.0,<2.0` / `^1.2`（同大版本） / `~1.2`（同小版本） /
-    `1.x`（同大版本）。多个子句以逗号或空格分隔，取交集。
+    支持:`*` / `1.2.3` / `>=1.0,<2.0` / `^1.2`(同大版本) / `~1.2`(同小版本) /
+    `1.x`(同大版本)。多个子句以逗号或空格分隔,取交集。
     """
 
     clauses: list[tuple[str, "Version"]] = field(default_factory=list)
@@ -158,13 +158,13 @@ class VersionRange:
 
     @property
     def lower(self) -> Optional[Version]:
-        """最严格的下界（用于判断"数据比 handler 旧"）。"""
+        """最严格的下界(用于判断"数据比 handler 旧")。"""
         bounds = [v for op, v in self.clauses if op in (">=", ">", "==")]
         return max(bounds, key=lambda v: v.key) if bounds else None
 
     @property
     def upper(self) -> Optional[Version]:
-        """最严格的上界（用于判断"数据比 handler 新"）。"""
+        """最严格的上界(用于判断"数据比 handler 新")。"""
         bounds = [v for op, v in self.clauses if op in ("<=", "<", "==")]
         return min(bounds, key=lambda v: v.key) if bounds else None
 
@@ -172,13 +172,13 @@ class VersionRange:
         return self.raw
 
 
-# 迁移函数签名：fn(data, context) -> data
+# 迁移函数签名:fn(data, context) -> data
 MigrationFn = Callable[..., Any]
 
 
 @dataclass
 class Migration:
-    """一条版本迁移边：把匹配 `from_range` 的数据改写为 `to_version`。"""
+    """一条版本迁移边:把匹配 `from_range` 的数据改写为 `to_version`。"""
 
     type_pattern: str
     from_range: VersionRange
@@ -198,7 +198,7 @@ class Migration:
 
 
 class MigrationGraph:
-    """按类型标签组织的迁移边集合，用 BFS 规划最短升级路径。"""
+    """按类型标签组织的迁移边集合,用 BFS 规划最短升级路径。"""
 
     def __init__(self) -> None:
         self._edges: list[Migration] = []
@@ -232,7 +232,7 @@ class MigrationGraph:
     ) -> Optional[list[Migration]]:
         """找一条把 `source` 版本带进 `target` 范围的迁移链。
 
-        返回 []（已在范围内）/ 迁移列表 / None（无路径）。
+        返回 [](已在范围内)/ 迁移列表 / None(无路径)。
         """
         start = Version.parse(source)
         if target.contains(start):

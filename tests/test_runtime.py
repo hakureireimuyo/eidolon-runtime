@@ -1,9 +1,9 @@
-"""eidolon-runtime 最小测试（零网络）。
+"""eidolon-runtime 最小测试(零网络)。
 
-覆盖：
-- 加载角色卡（复用 eidolon-character-service）
+覆盖:
+- 加载角色卡(复用 eidolon-character-service)
 - system prompt 由角色设定正确编译
-- 未配置 LLM Key 时对话优雅报错（不崩溃）
+- 未配置 LLM Key 时对话优雅报错(不崩溃)
 """
 from __future__ import annotations
 
@@ -33,13 +33,13 @@ from backend.main import app
 def _sample_character() -> Character:
     return Character(
         identity=Identity(name="TestBot", gender="无", species="AI"),
-        dialogue=Dialogue(greeting="你好，我是 TestBot。"),
+        dialogue=Dialogue(greeting="你好,我是 TestBot。"),
     )
 
 
 class TestRuntime(unittest.TestCase):
     def setUp(self):
-        # 隔离：指向一个空的临时配置，避免受真实 config.toml / 环境变量影响。
+        # 隔离:指向一个空的临时配置,避免受真实 config.toml / 环境变量影响。
         self._cfg = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
         self._cfg.close()
         os.environ["EIDOLON_RUNTIME_CONFIG"] = self._cfg.name
@@ -249,7 +249,7 @@ class TestSettingsAPI(unittest.TestCase):
 
 
 class TestEngineWithGateway(unittest.TestCase):
-    """Engine + LLMGateway + ContextManager 集成测试（零网络，注入 mock service）。"""
+    """Engine + LLMGateway + ContextManager 集成测试(零网络,注入 mock service)。"""
 
     def setUp(self):
         self._cfg = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
@@ -279,7 +279,7 @@ class TestEngineWithGateway(unittest.TestCase):
         return path
 
     def test_chat_with_mock_service(self):
-        """注入 mock service，验证 engine 通过 gateway + context 完成对话。"""
+        """注入 mock service,验证 engine 通过 gateway + context 完成对话。"""
         from runtime.llm.base import AIService
         from runtime.llm.errors import LLMUnconfigured
 
@@ -358,7 +358,7 @@ class TestEngineWithGateway(unittest.TestCase):
         self.assertEqual(eng.llm_provider(), "mock_provider")
 
     def test_chat_rollback_on_error(self):
-        """LLM 出错时对话历史应回滚（不留下未回复的 user 消息）。"""
+        """LLM 出错时对话历史应回滚(不留下未回复的 user 消息)。"""
         from runtime.llm.base import AIService
         from runtime.llm.errors import LLMError
 
@@ -381,7 +381,7 @@ class TestEngineWithGateway(unittest.TestCase):
             # 先正常对话一轮
             with self.assertRaises(LLMError):
                 eng.chat("this will fail")
-            # history 应为空（回滚）
+            # history 应为空(回滚)
             self.assertEqual(len(eng.history), 0)
         finally:
             os.unlink(path)

@@ -1,21 +1,21 @@
-"""动态资源：没有预定义 Schema 也能访问的数据对象。
+"""动态资源:没有预定义 Schema 也能访问的数据对象。
 
 这是"不需要提前定义工程资源内容"的核心。任何未注册类型的 JSON 数据都会被包成
-`DynamicResource`：
+`DynamicResource`:
 
     world = space.first("application/x-eidolon-world").value
     world.geography.regions[0].name        # 属性式访问
     world["factions.0.leader"]             # 点路径访问
     world.get("economy.currency", "金币")   # 带默认值
-    world.schema()                         # 推断出的结构，供 UI 自动生成表单
+    world.schema()                         # 推断出的结构,供 UI 自动生成表单
 
-三条硬约束：
+三条硬约束:
 
-- **零丢失**：原始数据完整保留，未知字段不会在读写往返中被抹掉——这是跨版本
-  兼容的前提（老运行时读新数据，写回时新字段仍在）。
-- **零异常**：访问不存在的路径返回 `None` 而不是抛错，避免一个字段缺失就中断
+- **零丢失**:原始数据完整保留,未知字段不会在读写往返中被抹掉——这是跨版本
+  兼容的前提(老运行时读新数据,写回时新字段仍在)。
+- **零异常**:访问不存在的路径返回 `None` 而不是抛错,避免一个字段缺失就中断
   整条加载链路。
-- **零依赖**：只用标准库，可被任何层复用。
+- **零依赖**:只用标准库,可被任何层复用。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ _MISSING = object()
 
 
 def wrap(value: Any) -> Any:
-    """把普通 JSON 结构递归包装为可导航对象（标量原样返回）。"""
+    """把普通 JSON 结构递归包装为可导航对象(标量原样返回)。"""
     if isinstance(value, DynamicResource):
         return value
     if isinstance(value, dict):
@@ -37,7 +37,7 @@ def wrap(value: Any) -> Any:
 
 
 def unwrap(value: Any) -> Any:
-    """还原为纯 JSON 结构（写回时使用）。"""
+    """还原为纯 JSON 结构(写回时使用)。"""
     if isinstance(value, DynamicResource):
         return value.to_dict()
     if isinstance(value, (list, tuple)):
@@ -46,7 +46,7 @@ def unwrap(value: Any) -> Any:
 
 
 def infer_schema(value: Any, _depth: int = 0) -> Any:
-    """从数据推断结构描述（供编辑器动态生成表单 / 校验）。"""
+    """从数据推断结构描述(供编辑器动态生成表单 / 校验)。"""
     if _depth > 6:
         return "any"
     if isinstance(value, DynamicResource):
@@ -71,7 +71,7 @@ def infer_schema(value: Any, _depth: int = 0) -> Any:
 
 
 class DynamicResource:
-    """字典的自适应视图：属性访问、点路径查询、结构推断，且永不丢字段。"""
+    """字典的自适应视图:属性访问、点路径查询、结构推断,且永不丢字段。"""
 
     __slots__ = ("_data",)
 
@@ -93,7 +93,7 @@ class DynamicResource:
         return wrap(self._data.get(key))
 
     def get(self, path: str, default: Any = None) -> Any:
-        """按点路径取值，支持列表下标：`a.b.0.c`。"""
+        """按点路径取值,支持列表下标:`a.b.0.c`。"""
         current: Any = self._data
         for part in str(path).split("."):
             if isinstance(current, DynamicResource):
@@ -116,9 +116,9 @@ class DynamicResource:
     def has(self, path: str) -> bool:
         return self.get(path, _MISSING) is not _MISSING
 
-    # ---- 写（动态创建 / 就地演化） ----
+    # ---- 写(动态创建 / 就地演化) ----
     def set(self, path: str, value: Any) -> "DynamicResource":
-        """按点路径写值，缺失的中间层会自动创建。"""
+        """按点路径写值,缺失的中间层会自动创建。"""
         parts = str(path).split(".")
         current = self._data
         for part in parts[:-1]:
@@ -143,7 +143,7 @@ class DynamicResource:
             self._data[key] = unwrap(value)
 
     def merge(self, other: Any, *, overwrite: bool = True) -> "DynamicResource":
-        """深合并另一份数据（用于迁移 / 打补丁，未提及的字段保持不变）。"""
+        """深合并另一份数据(用于迁移 / 打补丁,未提及的字段保持不变)。"""
         patch = unwrap(other) or {}
 
         def _merge(dst: dict, src: dict) -> dict:

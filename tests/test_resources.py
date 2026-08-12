@@ -1,8 +1,8 @@
-﻿"""资源路由框架测试（零网络）。
+﻿"""资源路由框架测试(零网络)。
 
-覆盖框架的四条承诺：
-1. 未知类型自动适配（含 manifest 未声明的孤儿文件）；
-2. 版本不匹配时自动迁移 / 前向兼容 / 降级，且整包加载永不中断；
+覆盖框架的四条承诺:
+1. 未知类型自动适配(含 manifest 未声明的孤儿文件)；
+2. 版本不匹配时自动迁移 / 前向兼容 / 降级,且整包加载永不中断；
 3. 运行时动态定义类型与动态创建资源；
 4. 写回时未知数据零丢失。
 """
@@ -38,12 +38,12 @@ WORLD_TYPE = "application/x-eidolon-world"
 
 
 def fresh_registry(name: str = "test") -> ResourceRegistry:
-    """独立注册表，避免测试之间互相污染。"""
+    """独立注册表,避免测试之间互相污染。"""
     return install_builtins(ResourceRegistry(name))
 
 
 def make_package(entries=(), *, raw_files=None, name="测试工程"):
-    """构造一个临时 .cart，返回路径。entries: [(id, type, dict, version)]"""
+    """构造一个临时 .cart,返回路径。entries: [(id, type, dict, version)]"""
     pkg = cart.create_package(name)
     for entry_id, type_value, payload, version in entries:
         data = (
@@ -100,7 +100,7 @@ class TestTypeRouting(unittest.TestCase):
 
 
 class TestUnknownDataAdaptation(unittest.TestCase):
-    """不预定义任何内容，也要能读出数据。"""
+    """不预定义任何内容,也要能读出数据。"""
 
     def test_unknown_type_becomes_navigable(self):
         path = make_package(

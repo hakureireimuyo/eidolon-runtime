@@ -1,13 +1,13 @@
-﻿"""包加载入口：把任意 Cartridge 包摊平成资源描述符，再交给路由器装载。
+﻿"""包加载入口:把任意 Cartridge 包摊平成资源描述符,再交给路由器装载。
 
-**不需要提前定义工程包里有什么**——描述符有三个来源，运行时一视同仁：
+**不需要提前定义工程包里有什么**——描述符有三个来源,运行时一视同仁:
 
-1. `manifest.entries` 声明的数据块（正规来源）；
-2. 包内**存在但未声明**的文件（孤儿文件，按扩展名推断类型后自动纳入）；
-3. `manifest.resources` 声明的媒体字节（进 `space.media`，语义归扩展层）。
+1. `manifest.entries` 声明的数据块(正规来源)；
+2. 包内**存在但未声明**的文件(孤儿文件,按扩展名推断类型后自动纳入)；
+3. `manifest.resources` 声明的媒体字节(进 `space.media`,语义归扩展层)。
 
-对包对象只做鸭子类型假设（`manifest` / `entries` / `raw_files`），不硬依赖
-cartridge；传入文件路径时才按需 import，方便测试用桩对象。
+对包对象只做鸭子类型假设(`manifest` / `entries` / `raw_files`),不硬依赖
+cartridge；传入文件路径时才按需 import,方便测试用桩对象。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ MANIFEST_NAMES = {"manifest.json", "/manifest.json"}
 
 
 def open_package(path: str) -> Any:
-    """打开 .cart / .png / .zip，返回 Cartridge Package。"""
+    """打开 .cart / .png / .zip,返回 Cartridge Package。"""
     import cartridge as cart
 
     return cart.open(path)
@@ -80,7 +80,7 @@ def _entry_descriptors(package: Any) -> tuple[list[ResourceDescriptor], list[dic
             )
         )
 
-    # manifest 未声明、但 Package.entries 里存在的数据块（构建期直接塞入的情况）
+    # manifest 未声明、但 Package.entries 里存在的数据块(构建期直接塞入的情况)
     for entry_id, entry in entries.items():
         if entry_id in seen_ids:
             continue
@@ -111,7 +111,7 @@ def _entry_descriptors(package: Any) -> tuple[list[ResourceDescriptor], list[dic
 def _orphan_descriptors(
     package: Any, claimed: set[str], existing_ids: set[str]
 ) -> list[ResourceDescriptor]:
-    """扫描 manifest 未声明的包内文件，按扩展名推断类型自动纳入。"""
+    """扫描 manifest 未声明的包内文件,按扩展名推断类型自动纳入。"""
     raw_files = getattr(package, "raw_files", {}) or {}
     out: list[ResourceDescriptor] = []
     for path, data in sorted(raw_files.items()):
@@ -142,7 +142,7 @@ def _orphan_descriptors(
 def descriptors_from_package(
     package: Any, *, include_undeclared: bool = True
 ) -> tuple[list[ResourceDescriptor], list[dict]]:
-    """把一个包摊平成描述符列表，附带缺失数据块清单。"""
+    """把一个包摊平成描述符列表,附带缺失数据块清单。"""
     descriptors, missing, claimed = _entry_descriptors(package)
     manifest = getattr(package, "manifest", {}) or {}
     for res in manifest.get("resources") or []:
@@ -161,9 +161,9 @@ def load_package(
     router: Optional[ResourceRouter] = None,
     include_undeclared: bool = True,
 ) -> ResourceSpace:
-    """加载一个工程包（路径或已打开的 Package），返回资源空间。
+    """加载一个工程包(路径或已打开的 Package),返回资源空间。
 
-    绝不因为某份数据无法解释而失败——未知类型进 `generic`，坏版本进 `degraded`，
+    绝不因为某份数据无法解释而失败——未知类型进 `generic`,坏版本进 `degraded`,
     缺失数据块进报告的 `missing` 列表。
     """
     reg = registry or default_registry
@@ -184,7 +184,7 @@ def load_package(
         source=path,
     )
 
-    # 媒体字节：语义归扩展层，容器只负责寻址
+    # 媒体字节:语义归扩展层,容器只负责寻址
     raw_files = getattr(package, "raw_files", {}) or {}
     for res in manifest.get("resources") or []:
         rid = res.get("id")

@@ -1,14 +1,14 @@
-﻿"""类型标签寻址：MIME 风格 type 的解析与模式匹配打分。
+﻿"""类型标签寻址:MIME 风格 type 的解析与模式匹配打分。
 
-资源路由的**寻址基础**。协议层（cartridge）只把 `entry.type` 当作一个不透明
-的路由标签原样传递；运行时在此定义"标签如何被匹配"，从而做到：
+资源路由的**寻址基础**。协议层(cartridge)只把 `entry.type` 当作一个不透明
+的路由标签原样传递；运行时在此定义"标签如何被匹配",从而做到:
 
-- 消费方不需要预先知道包里有哪些 type，只需注册"我能处理哪一类标签"；
-- 具体标签（`application/x-eidolon-character`）优先于宽泛标签
-  （`application/x-eidolon-*` > `application/*` > `*/*`），
-  于是永远存在一个兜底 handler，未知数据也不会加载失败。
+- 消费方不需要预先知道包里有哪些 type,只需注册"我能处理哪一类标签"；
+- 具体标签(`application/x-eidolon-character`)优先于宽泛标签
+  (`application/x-eidolon-*` > `application/*` > `*/*`),
+  于是永远存在一个兜底 handler,未知数据也不会加载失败。
 
-打分规则（分数越高越具体，None 表示不匹配）：
+打分规则(分数越高越具体,None 表示不匹配):
 
     application/x-eidolon-character  ->  5000   精确
     application/x-eidolon-*          ->  1464   子类型前缀通配
@@ -24,7 +24,7 @@ from typing import Optional
 
 WILDCARD = "*/*"
 
-# 扩展名 -> MIME，用于推断 manifest 未声明文件的类型（"孤儿文件"自动适配）。
+# 扩展名 -> MIME,用于推断 manifest 未声明文件的类型("孤儿文件"自动适配)。
 EXTENSION_TYPES: dict[str, str] = {
     ".json": "application/json",
     ".jsonl": "application/x-ndjson",
@@ -52,7 +52,7 @@ DEFAULT_TYPE = "application/octet-stream"
 
 
 def normalize(value: Optional[str]) -> str:
-    """去掉参数与大小写差异：`Application/JSON; charset=utf-8` -> `application/json`。"""
+    """去掉参数与大小写差异:`Application/JSON; charset=utf-8` -> `application/json`。"""
     if not value:
         return ""
     return str(value).split(";", 1)[0].strip().lower()
@@ -72,7 +72,7 @@ def split(value: Optional[str]) -> tuple[str, str, str]:
 
 
 def guess_type(path: str) -> str:
-    """按文件扩展名推断类型标签（用于 manifest 未声明的包内文件）。"""
+    """按文件扩展名推断类型标签(用于 manifest 未声明的包内文件)。"""
     lowered = (path or "").lower()
     for ext, mime in EXTENSION_TYPES.items():
         if lowered.endswith(ext):
@@ -81,14 +81,14 @@ def guess_type(path: str) -> str:
 
 
 def _segment_score(pattern_seg: str, value_seg: str) -> Optional[int]:
-    """单段（主类型或子类型）匹配打分。"""
+    """单段(主类型或子类型)匹配打分。"""
     if pattern_seg == value_seg:
         return 1000
     if "*" not in pattern_seg:
         return None
     regex = "^" + ".*".join(re.escape(part) for part in pattern_seg.split("*")) + "$"
     if re.match(regex, value_seg):
-        # 通配符之外的字面字符越多，模式越具体
+        # 通配符之外的字面字符越多,模式越具体
         return 100 + len(pattern_seg.replace("*", ""))
     return None
 
@@ -96,7 +96,7 @@ def _segment_score(pattern_seg: str, value_seg: str) -> Optional[int]:
 def match_score(pattern: str, value: str) -> Optional[int]:
     """`pattern` 匹配类型 `value` 的特异度分数；不匹配返回 None。
 
-    子类型的权重高于主类型（乘 4），保证 `application/x-eidolon-*`
+    子类型的权重高于主类型(乘 4),保证 `application/x-eidolon-*`
     比 `application/*` 更具体。
     """
     pat = normalize(pattern)
@@ -119,5 +119,5 @@ def match_score(pattern: str, value: str) -> Optional[int]:
 
 
 def matches(pattern: str, value: str) -> bool:
-    """是否匹配（忽略特异度）。"""
+    """是否匹配(忽略特异度)。"""
     return match_score(pattern, value) is not None

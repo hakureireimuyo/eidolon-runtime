@@ -246,7 +246,7 @@ async function refreshCharacter() {
       messagesEl.innerHTML = '<div class="msg sys">等待加载角色卡……</div>';
     }
   } catch (e) {
-    notice("获取角色信息失败：" + e.message);
+    notice("获取角色信息失败:" + e.message);
   }
 }
 
@@ -260,10 +260,10 @@ $("#fileInput").addEventListener("change", async (e) => {
     fd.append("file", file);
     const res = await fetch("/api/load", { method: "POST", body: fd });
     const data = await res.json();
-    if (!res.ok) { notice("加载失败：" + (data.detail || res.status)); return; }
+    if (!res.ok) { notice("加载失败:" + (data.detail || res.status)); return; }
     await refreshCharacter();
   } catch (err) {
-    notice("加载失败：" + err.message);
+    notice("加载失败:" + err.message);
   } finally {
     e.target.value = "";
   }
@@ -286,12 +286,12 @@ async function send() {
       body: JSON.stringify({ message: text }),
     });
     const data = await res.json();
-    if (!res.ok) { notice("对话失败：" + (data.detail || res.status)); think.remove(); return; }
+    if (!res.ok) { notice("对话失败:" + (data.detail || res.status)); think.remove(); return; }
     think.remove();
     addMessage("bot", data.reply);
   } catch (err) {
     think.remove();
-    notice("对话失败：" + err.message);
+    notice("对话失败:" + err.message);
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
@@ -327,7 +327,7 @@ async function openSettings() {
     $("#settingsMsg").textContent = "";
     settingsModal.style.display = "flex";
   } catch (e) {
-    notice("读取设置失败：" + e.message);
+    notice("读取设置失败:" + e.message);
   }
 }
 
@@ -347,11 +347,11 @@ $("#settingsSave").addEventListener("click", async () => {
       body: JSON.stringify(body),
     });
     const d = await r.json();
-    if (!r.ok) { $("#settingsMsg").textContent = "保存失败：" + (d.detail || r.status); return; }
+    if (!r.ok) { $("#settingsMsg").textContent = "保存失败:" + (d.detail || r.status); return; }
     $("#settingsMsg").textContent = "已保存 ✓";
     setTimeout(() => { settingsModal.style.display = "none"; }, 700);
   } catch (e) {
-    $("#settingsMsg").textContent = "保存失败：" + e.message;
+    $("#settingsMsg").textContent = "保存失败:" + e.message;
   }
 });
 

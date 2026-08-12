@@ -1,16 +1,16 @@
-﻿"""资源空间：一个已加载工程包在运行时的全部资源视图。
+﻿"""资源空间:一个已加载工程包在运行时的全部资源视图。
 
 `ResourceSpace` 取代了过去"引擎只认识一个 Character"的硬编码结构。它是一张按
-id 与类型标签双索引的资源表：
+id 与类型标签双索引的资源表:
 
     space = load_package("world.cart")
-    space.first("application/x-eidolon-character")   # 有就用，没有也不报错
+    space.first("application/x-eidolon-character")   # 有就用,没有也不报错
     space.of_type("application/x-eidolon-*")         # 按通配拿一族资源
     space.create("application/x-eidolon-quest", {...})  # 运行时动态新增
     space.save("world.cart")                          # 连未知数据一起写回
 
-写回时的关键保证：**没有 handler 能解释的资源，用原始字节原样写回**，所以低版本
-运行时打开高版本工程再保存，也不会丢掉自己看不懂的那部分数据。
+写回时的关键保证:**没有 handler 能解释的资源,用原始字节原样写回**,所以低版本
+运行时打开高版本工程再保存,也不会丢掉自己看不懂的那部分数据。
 """
 
 from __future__ import annotations
@@ -110,10 +110,10 @@ class ResourceSpace:
         usable_only: bool = False,
         typed_only: bool = False,
     ) -> list[ResourceRecord]:
-        """按类型标签（支持通配）取一族资源，按特异度与 id 稳定排序。
+        """按类型标签(支持通配)取一族资源,按特异度与 id 稳定排序。
 
-        `typed_only=True` 只返回被专用 handler 解释过的记录（取角色卡这类
-        领域对象时用），默认连通用装载的未知资源一起返回。
+        `typed_only=True` 只返回被专用 handler 解释过的记录(取角色卡这类
+        领域对象时用),默认连通用装载的未知资源一起返回。
         """
         matched = []
         for record in self.records.values():
@@ -182,7 +182,7 @@ class ResourceSpace:
     ) -> ResourceRecord:
         """在运行时新增一份资源。
 
-        类型未注册也能创建——会走通用 JSON 处理，字节照样能写回包。
+        类型未注册也能创建——会走通用 JSON 处理,字节照样能写回包。
         """
         resource_id = id or _default_id(type_value, self.records)
         found = self.registry.resolve(type_value)
@@ -264,7 +264,7 @@ class ResourceSpace:
         }
 
     def to_package(self, package: Any = None) -> Any:
-        """把资源空间写回一个 Cartridge 包对象（未知数据用原始字节保留）。"""
+        """把资源空间写回一个 Cartridge 包对象(未知数据用原始字节保留)。"""
         import cartridge as cart
 
         if package is None:
@@ -296,7 +296,7 @@ class ResourceSpace:
         return package
 
     def save(self, output_path: str, *, image_source: Optional[str] = None) -> str:
-        """写出 .cart（或提供封面图时写出 .png）。"""
+        """写出 .cart(或提供封面图时写出 .png)。"""
         import cartridge as cart
 
         package = self.to_package()
