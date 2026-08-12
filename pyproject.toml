@@ -1,22 +1,24 @@
 [project]
 name = "eidolon-runtime"
 version = "0.1.0"
-description = "Eidolon 运行时层 —— 消费 PersonaSeed 包与 eidolon-character，驱动角色对话（使用者界面层之下的执行核心）"
+description = "Eidolon 运行时组合层 —— Web 服务 + UI + Extension Registry + Context Compiler"
 requires-python = ">=3.11"
-
-# 运行时层是「应用 / 服务」类项目，按环境隔离约定独立持有 venv（见 docs/environment-isolation.md）。
-# personaseed / eidolon-character 由同级兄弟仓库通过 runtime/loader.py 的 sys.path 注入直接复用（开发期），
-# 生产期应改为 editable 安装：pip install -e ../PersonaSeed ../eidolon-character
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.9",
     "openai>=1.30",
     "pillow>=10.0",
+    "eidolon-character",
+    "eidolon-character-service",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
-[tool.setuptools]
-packages = ["runtime", "backend"]
+[tool.setuptools.packages.find]
+include = ["runtime*", "backend*"]
+
+[tool.uv.sources]
+eidolon-character = { workspace = true }
+eidolon-character-service = { workspace = true }

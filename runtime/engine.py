@@ -1,11 +1,16 @@
-"""对话引擎：运行时层的核心。
+"""对话引擎：运行时组合层的会话核心。
 
-- 从 Character 构建 system prompt（角色设定 -> 给模型的「你是谁」）；
-- 维护对话历史（运行时可变状态，不属于角色卡模板）；
-- 驱动最基础对话：把 [system, 历史..., user] 交给 LLM，取回回复。
+重构后架构（两层抽象）：
+- ContextManager 管理上下文分层 + 编译 messages（不再手拼）
+- LLMGateway 封装底层 LLM provider 差异（不再直接调 llm_chat）
 
-角色身份 = 模板（永久定义），对话历史 = 运行时状态，二者严格分离
-（见 eidolon-character 约定与 docs/project-responsibilities.md §3.4）。
+engine 只负责：
+1. 加载角色卡 → 设置 static 上下文
+2. 接收用户输入 → 加入对话缓冲
+3. 编译上下文 → 通过 gateway 发送 → 取回回复
+4. 回复加入对话缓冲 → 返回
+
+角色身份 = 模板（永久定义），对话历史 = 运行时状态，二者严格分离。
 """
 from __future__ import annotations
 
@@ -13,156 +18,149 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-# 先导入 loader：它负责把同级 PersonaSeed / eidolon-character 注入 sys.path，
-# 之后才能安全 import eidolon_character。
-from .loader import load_character_file, CharacterLoadError
-from .llm import chat as llm_chat, LLMUnconfigured, LLMError
-from eidolon_character.model import Character  # noqa: E402
+from eidolon_character_service import (
+    load_character_file,
+    CharacterLoadError,
+    build_system_prompt,
+    character_info as build_character_info,
+)
+from .llm import LLMUnconfigured, LLMError
+from .llm_gateway import LLMGateway, LLMRequest
+from .context import ContextManager
+
+# 重新导出，保持原有 API 兼容
+__all__ = ["RuntimeEngine", "ChatMessage", "CharacterLoadError"]
 
 
 @dataclass
 class ChatMessage:
+    """对话消息（向后兼容的数据结构）。"""
+
     role: str  # "user" | "assistant"
     content: str
     ts: float = field(default_factory=time.time)
 
 
-def build_system_prompt(c: Character) -> str:
-    """把角色设定编译成一段 system prompt。"""
-    idn = c.identity
-    lines: list[str] = []
-    lines.append("你正在扮演一个虚构角色，与用户进行对话。请始终严格保持在角色之内：")
-    lines.append("- 不要承认自己是人工智能、语言模型或程序；")
-    lines.append("- 不要跳出角色，也不要用括号描写动作（除非角色设定本就如此）；")
-    lines.append("- 以第一人称、符合角色性格与背景的方式回应。")
-    lines.append("")
-    lines.append("# 角色设定")
-    if idn.name:
-        lines.append(f"姓名：{idn.name}")
-    if idn.nickname:
-        lines.append(f"昵称：{idn.nickname}")
-    if idn.gender:
-        lines.append(f"性别：{idn.gender}")
-    if idn.age is not None:
-        lines.append(f"年龄：{idn.age}")
-    if idn.species:
-        lines.append(f"物种：{idn.species}")
-
-    if c.background.summary:
-        lines.append(f"\n# 背景\n{c.background.summary}")
-    bg_extra: list[str] = []
-    if c.background.occupation:
-        bg_extra.append(f"职业：{c.background.occupation}")
-    if c.background.location:
-        bg_extra.append(f"所在地：{c.background.location}")
-    if bg_extra:
-        lines.append("\n".join(bg_extra))
-
-    if c.appearance.description:
-        lines.append(f"\n# 外貌\n{c.appearance.description}")
-    if c.appearance.features:
-        lines.append("外貌特征：" + "、".join(c.appearance.features))
-
-    if c.personality.description:
-        lines.append(f"\n# 性格\n{c.personality.description}")
-    if c.personality.traits:
-        lines.append("性格特质：" + "、".join(c.personality.traits))
-    if c.personality.values:
-        lines.append("价值观：" + "、".join(c.personality.values))
-
-    if c.dialogue.style:
-        lines.append(f"\n# 说话风格\n{c.dialogue.style}")
-
-    if c.dialogue.examples:
-        lines.append("\n# 对话示例")
-        for ex in c.dialogue.examples:
-            lines.append(f"用户：{ex.user}")
-            lines.append(f"{idn.name}：{ex.assistant}")
-
-    lines.append("\n请基于以上设定回应用户。")
-    return "\n".join(lines)
-
-
 class RuntimeEngine:
-    """一个运行时会话：持有一个已加载角色 + 一段对话历史。"""
+    """一个运行时会话：持有一个已加载角色 + 一段对话历史。
 
-    def __init__(self) -> None:
-        self.character: Optional[Character] = None
+    通过 LLMGateway + ContextManager 两层抽象与 LLM 交互，
+    不直接操作 messages 拼接或 provider 选择。
+    """
+
+    # 上下文片段的语义标签（用于 ContextManager 内部标识）
+    _TAG_CHARACTER_PROMPT = "character_prompt"
+
+    def __init__(
+        self,
+        *,
+        gateway: LLMGateway | None = None,
+        context: ContextManager | None = None,
+    ) -> None:
+        self.character = None
         self.assets: dict[str, bytes] = {}
         self.asset_types: dict[str, Optional[str]] = {}
         self.manifest: dict = {}
+
+        # 两层抽象：LLM 网关 + 上下文管理器
+        self._gateway = gateway or LLMGateway()
+        self._context = context or ContextManager()
+
+        # 对话历史（向后兼容 history 属性）
+        # 实际数据存储在 ContextManager 的 ConversationBuffer 中，
+        # 此列表作为只读镜像供外部消费。
         self.history: list[ChatMessage] = []
 
     # ---- 加载 ----
+
     def load(self, path: str) -> dict:
         character, assets, manifest = load_character_file(path)
         self.character = character
         self.assets = assets
         self.manifest = manifest
         self.asset_types = {a.id: a.type for a in character.assets}
+
+        # 将角色 system prompt 设置为静态层上下文
+        system_prompt = build_system_prompt(character)
+        self._context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
+
+        # 重置对话
+        self._context.reset_conversation()
         self.history = []
         return self.character_info()
 
     # ---- 角色卡信息（供前端展示） ----
+
     def character_info(self) -> dict:
         if self.character is None:
             return {"loaded": False}
-        c = self.character
-        return {
-            "loaded": True,
-            "name": c.identity.name,
-            "nickname": c.identity.nickname,
-            "gender": c.identity.gender,
-            "age": c.identity.age,
-            "species": c.identity.species,
-            "background": {
-                "summary": c.background.summary,
-                "occupation": c.background.occupation,
-                "location": c.background.location,
-            },
-            "appearance": {
-                "description": c.appearance.description,
-                "features": c.appearance.features,
-            },
-            "personality": {
-                "description": c.personality.description,
-                "traits": c.personality.traits,
-                "values": c.personality.values,
-            },
-            "dialogue": {
-                "style": c.dialogue.style,
-                "greeting": c.dialogue.greeting,
-                "examples": [
-                    {"user": e.user, "assistant": e.assistant}
-                    for e in c.dialogue.examples
-                ],
-            },
-            "assets": [
-                {"id": a.id, "type": a.type, "purpose": a.purpose, "caption": a.caption}
-                for a in c.assets
-            ],
-            "greeting": c.dialogue.greeting,
-        }
+        return build_character_info(self.character)
 
     # ---- 对话历史 ----
+
     def reset(self) -> None:
+        """清空对话历史（保留已加载角色和静态上下文）。"""
+        self._context.reset_conversation()
         self.history = []
 
     def chat(self, user_message: str) -> dict:
+        """处理一条用户消息，返回模型回复与对话历史。
+
+        流程：
+        1. 将用户消息加入上下文管理器（高频层）
+        2. 编译上下文为 messages（缓存友好布局）
+        3. 通过 LLM Gateway 发送请求
+        4. 将回复加入上下文管理器
+        5. 同步 history 镜像并返回
+        """
         if self.character is None:
-            raise CharacterLoadError("尚未加载角色卡，请先加载 .seed / .png。")
+            raise CharacterLoadError("尚未加载角色卡，请先加载 .cart / .png。")
 
-        system_prompt = build_system_prompt(self.character)
-        messages: list[dict] = [{"role": "system", "content": system_prompt}]
-        for m in self.history:
-            messages.append({"role": m.role, "content": m.content})
-        messages.append({"role": "user", "content": user_message})
-
-        reply = llm_chat(messages)
-
+        # 1. 用户消息进入上下文
+        self._context.add_message("user", user_message)
         self.history.append(ChatMessage(role="user", content=user_message))
-        self.history.append(ChatMessage(role="assistant", content=reply))
+
+        # 2. 编译上下文 → messages
+        messages = self._context.compile()
+
+        # 3. 通过 Gateway 发送
+        request = LLMRequest(messages=messages)
+        try:
+            response = self._gateway.complete(request)
+        except LLMUnconfigured:
+            # 回滚：移除刚加入的用户消息（因为没有得到回复）
+            self._context.reset_conversation()
+            # 重新加入已有的历史（不含刚才那条）
+            for m in self.history[:-1]:
+                self._context.add_message(m.role, m.content)
+            # 移除 history 末尾
+            self.history.pop()
+            raise
+        except LLMError:
+            # 同上回滚
+            self._context.reset_conversation()
+            for m in self.history[:-1]:
+                self._context.add_message(m.role, m.content)
+            self.history.pop()
+            raise
+
+        # 4. 回复进入上下文
+        self._context.add_message("assistant", response.content)
+        self.history.append(ChatMessage(role="assistant", content=response.content))
+
         return {
-            "reply": reply,
-            "history": [{"role": m.role, "content": m.content} for m in self.history],
+            "reply": response.content,
+            "history": [
+                {"role": m.role, "content": m.content} for m in self.history
+            ],
         }
+
+    # ---- 诊断信息 ----
+
+    def context_cache_info(self) -> dict:
+        """返回上下文缓存状态（供调试 / 性能优化）。"""
+        return self._context.cache_info()
+
+    def llm_provider(self) -> str:
+        """当前使用的 LLM provider 名称。"""
+        return self._gateway.provider

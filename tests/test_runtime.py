@@ -1,29 +1,22 @@
 """eidolon-runtime 最小测试（零网络）。
 
 覆盖：
-- 加载角色卡（复用 PersonaSeed + eidolon-character）
+- 加载角色卡（复用 eidolon-character-service）
 - system prompt 由角色设定正确编译
 - 未配置 LLM Key 时对话优雅报错（不崩溃）
 """
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-# 开发期注入同级兄弟仓库（示例 / 测试运行于 eidolon-runtime 内）。
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-for name in ("PersonaSeed", "eidolon-character"):
-    p = os.path.join(ROOT, name)
-    if os.path.isdir(p) and p not in sys.path:
-        sys.path.insert(0, p)
-
 from eidolon_character.builder import build_seed
 from eidolon_character.model import Character, Dialogue, Identity
+from eidolon_character_service import build_system_prompt, CharacterLoadError
 
-from runtime.engine import RuntimeEngine, build_system_prompt
+from runtime.engine import RuntimeEngine
 from runtime.llm import (
     LLMError,
     LLMUnconfigured,
@@ -253,6 +246,145 @@ class TestSettingsAPI(unittest.TestCase):
         self.assertEqual(d["model"], "deepseek-chat")
         self.assertEqual(d["temperature"], 0.7)
         self.assertEqual(d["max_tokens"], 800)
+
+
+class TestEngineWithGateway(unittest.TestCase):
+    """Engine + LLMGateway + ContextManager 集成测试（零网络，注入 mock service）。"""
+
+    def setUp(self):
+        self._cfg = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
+        self._cfg.close()
+        os.environ["EIDOLON_RUNTIME_CONFIG"] = self._cfg.name
+        for k in (
+            "EIDOLON_LLM_PROVIDER",
+            "EIDOLON_LLM_API_KEY",
+            "EIDOLON_DEEPSEEK_API_KEY",
+            "EIDOLON_LLM_TEMPERATURE",
+            "EIDOLON_LLM_MAX_TOKENS",
+        ):
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        os.environ.pop("EIDOLON_RUNTIME_CONFIG", None)
+        try:
+            os.unlink(self._cfg.name)
+        except OSError:
+            pass
+
+    def _make_seed(self) -> str:
+        c = _sample_character()
+        fd, path = tempfile.mkstemp(suffix=".seed")
+        os.close(fd)
+        build_seed(c, output_path=path)
+        return path
+
+    def test_chat_with_mock_service(self):
+        """注入 mock service，验证 engine 通过 gateway + context 完成对话。"""
+        from runtime.llm.base import AIService
+        from runtime.llm.errors import LLMUnconfigured
+
+        class MockService(AIService):
+            name = "mock"
+
+            def __init__(self, **kw):
+                self.api_key = kw.get("api_key", "sk-mock")
+
+            def chat(self, messages, *, stream=False):
+                for m in reversed(messages):
+                    if m["role"] == "user":
+                        return f"[mock]{m['content']}"
+                return "[mock]empty"
+
+        from runtime.llm_gateway import LLMGateway
+
+        path = self._make_seed()
+        try:
+            gw = LLMGateway(service=MockService())
+            eng = RuntimeEngine(gateway=gw)
+            eng.load(path)
+            result = eng.chat("你好")
+            self.assertEqual(result["reply"], "[mock]你好")
+            self.assertEqual(len(result["history"]), 2)
+            self.assertEqual(result["history"][0]["role"], "user")
+            self.assertEqual(result["history"][1]["role"], "assistant")
+        finally:
+            os.unlink(path)
+
+    def test_context_cache_info_after_chat(self):
+        """验证 engine 对话后能返回上下文缓存信息。"""
+        from runtime.llm.base import AIService
+
+        class MockService(AIService):
+            name = "mock"
+
+            def __init__(self, **kw):
+                pass
+
+            def chat(self, messages, *, stream=False):
+                return "ok"
+
+        from runtime.llm_gateway import LLMGateway
+
+        path = self._make_seed()
+        try:
+            gw = LLMGateway(service=MockService())
+            eng = RuntimeEngine(gateway=gw)
+            eng.load(path)
+            eng.chat("test message")
+            info = eng.context_cache_info()
+            self.assertIn("prefix_segments", info)
+            self.assertIn("dynamic_segments", info)
+            self.assertEqual(info["conversation_turns"], 2)  # user + assistant
+        finally:
+            os.unlink(path)
+
+    def test_llm_provider_name(self):
+        """验证 engine 能返回当前 provider 名称。"""
+        from runtime.llm.base import AIService
+
+        class MockService(AIService):
+            name = "mock_provider"
+
+            def __init__(self, **kw):
+                pass
+
+            def chat(self, messages, *, stream=False):
+                return "ok"
+
+        from runtime.llm_gateway import LLMGateway
+
+        gw = LLMGateway(service=MockService())
+        eng = RuntimeEngine(gateway=gw)
+        self.assertEqual(eng.llm_provider(), "mock_provider")
+
+    def test_chat_rollback_on_error(self):
+        """LLM 出错时对话历史应回滚（不留下未回复的 user 消息）。"""
+        from runtime.llm.base import AIService
+        from runtime.llm.errors import LLMError
+
+        class FailingService(AIService):
+            name = "failing"
+
+            def __init__(self, **kw):
+                pass
+
+            def chat(self, messages, *, stream=False):
+                raise LLMError("simulated")
+
+        from runtime.llm_gateway import LLMGateway
+
+        path = self._make_seed()
+        try:
+            gw = LLMGateway(service=FailingService())
+            eng = RuntimeEngine(gateway=gw)
+            eng.load(path)
+            # 先正常对话一轮
+            with self.assertRaises(LLMError):
+                eng.chat("this will fail")
+            # history 应为空（回滚）
+            self.assertEqual(len(eng.history), 0)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
