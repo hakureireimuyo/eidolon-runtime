@@ -252,3 +252,8 @@ class RuntimeEngine:
     def llm_provider(self) -> str:
         """当前使用的 LLM provider 名称。"""
         return self._gateway.provider
+
+    @property
+    def context_manager(self) -> ContextManager:
+        """上下文管理器(只读入口,供诊断与开发者工具读取上下文状态)。"""
+        return self._context

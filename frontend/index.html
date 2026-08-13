@@ -101,6 +101,7 @@
   </label>
   <button class="ghost" id="settingsBtn">设置</button>
   <button class="ghost" id="resetBtn">清空对话</button>
+  <button class="ghost" id="devtoolsBtn">开发者工具</button>
 </header>
 
 <div id="notice" class="notice" style="display:none"></div>
@@ -307,6 +308,8 @@ $("#resetBtn").addEventListener("click", async () => {
   await fetch("/api/reset", { method: "POST" });
   await refreshCharacter();
 });
+
+$("#devtoolsBtn").addEventListener("click", () => { location.href = "/devtools"; });
 
 // ---- 设置弹窗 ----
 const settingsModal = $("#settingsModal");

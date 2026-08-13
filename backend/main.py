@@ -18,7 +18,7 @@ from runtime import engine as engine_mod  # noqa: F401  (确保包被导入)
 from runtime.engine import RuntimeEngine, CharacterLoadError
 from runtime.llm import LLMUnconfigured, LLMError
 from runtime.llm.config_file import load_llm_config, save_llm_config
-from runtime.config import DATA_ROOT
+from runtime.config import DATA_ROOT, DEVTOOLS_ENABLED
 from runtime.resources import registry as default_registry
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -202,3 +202,22 @@ def define_type(payload: dict):
 def registry_report():
     """当前资源注册表报告(已注册的处理器与迁移链)。"""
     return default_registry.report()
+
+
+# ---------------------------------------------------------------------------
+# 开发者工具(仅在 EIDOLON_RUNTIME_DEVTOOLS=1 时挂载;关闭则零注册)
+# ---------------------------------------------------------------------------
+if DEVTOOLS_ENABLED:
+    from backend.devtools import build_router
+
+    app.include_router(build_router(engine))
+
+    @app.get("/devtools")
+    def devtools_index():
+        """开发者工具入口页(工具清单)。"""
+        return FileResponse(str(FRONTEND_DIR / "devtools" / "index.html"))
+
+    @app.get("/devtools/context")
+    def devtools_context():
+        """上下文检查器页。"""
+        return FileResponse(str(FRONTEND_DIR / "devtools" / "context.html"))

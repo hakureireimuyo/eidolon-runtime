@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>开发者工具 · Eidolon Runtime</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --accent-2: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .tag { font-size: 12px; color: var(--muted); }
+  header .spacer { flex: 1; }
+  button, a.btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+    text-decoration: none; display: inline-block; transition: filter .15s;
+  }
+  button:hover, a.btn:hover { filter: brightness(1.1); }
+
+  main { flex: 1; overflow-y: auto; padding: 28px; }
+  main .intro { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 16px; }
+  .tool-card {
+    display: block; width: 300px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 18px;
+    text-decoration: none; color: var(--text); transition: border-color .15s, transform .15s;
+  }
+  .tool-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .tool-card .icon { font-size: 28px; margin-bottom: 10px; }
+  .tool-card h2 { margin: 0 0 8px; font-size: 15px; }
+  .tool-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+  .tool-card .go { margin-top: 12px; color: var(--accent); font-size: 12px; }
+
+  footer {
+    padding: 10px 28px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛠 开发者工具</h1>
+  <span class="tag">开发 / 测试辅助 · 只读诊断</span>
+  <span class="spacer"></span>
+  <a class="btn" href="/">← 返回应用</a>
+</header>
+
+<main>
+  <p class="intro">以下工具全部为只读诊断,不改变运行时状态;工具自身状态只存内存,不落盘。</p>
+  <div class="tools" id="tools"></div>
+</main>
+
+<footer>新增工具:在 <code>frontend/devtools/index.html</code> 的 TOOLS 数组登记,后端路由在 <code>backend/devtools/</code> 扩展。</footer>
+
+<script>
+// 工具清单:后续新增工具在此追加一项即可
+const TOOLS = [
+  {
+    icon: "🧠",
+    name: "上下文检查器",
+    desc: "各稳定性层级统计;与上次查看 / 钉住基线做 hash 对比,判断前缀缓存是否命中;查看每个片段与编译后最终模型输入。",
+    href: "/devtools/context",
+  },
+];
+
+const toolsEl = document.getElementById("tools");
+toolsEl.innerHTML = TOOLS.map((t) => `
+  <a class="tool-card" href="${t.href}">
+    <div class="icon">${t.icon}</div>
+    <h2>${t.name}</h2>
+    <p>${t.desc}</p>
+    <div class="go">打开 →</div>
+  </a>
+`).join("");
+</script>
+</body>
+</html>
