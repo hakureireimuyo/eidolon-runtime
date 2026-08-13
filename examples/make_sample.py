@@ -1,4 +1,4 @@
-"""生成一个示例角色包(alice.seed),供运行时加载 / 端到端验证。
+"""生成一个示例角色包(alice.cart),供运行时加载 / 端到端验证。
 
 运行:
     python -m examples.make_sample
@@ -8,7 +8,7 @@ from __future__ import annotations
 import io
 import os
 
-from eidolon_character.builder import build_seed
+from eidolon_character.builder import build_cart
 from eidolon_character.model import (
     Appearance,
     Background,
@@ -64,8 +64,8 @@ def main() -> None:
         assets=[CharacterAsset(id="portrait", type="image/png", purpose="portrait", caption="角色立绘")],
     )
 
-    out = os.path.join(os.path.dirname(__file__), "alice.seed")
-    build_seed(
+    out = os.path.join(os.path.dirname(__file__), "alice.cart")
+    build_cart(
         character,
         images={"portrait": _make_portrait()},
         output_path=out,

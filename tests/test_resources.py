@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 import cartridge as cart
-from eidolon_character.builder import build_seed
+from eidolon_character.builder import build_cart
 from eidolon_character.model import Character, Dialogue, Identity
 
 from runtime.engine import RuntimeEngine, CharacterLoadError
@@ -373,7 +373,7 @@ class TestEngineIntegration(unittest.TestCase):
     def _character_seed(self, extra_entries=()):
         fd, path = tempfile.mkstemp(suffix=".cart")
         os.close(fd)
-        build_seed(
+        build_cart(
             Character(
                 identity=Identity(name="TestBot"),
                 dialogue=Dialogue(greeting="你好"),
@@ -448,7 +448,7 @@ class TestResourceAPI(unittest.TestCase):
         self.engine = engine
         fd, self.path = tempfile.mkstemp(suffix=".cart")
         os.close(fd)
-        build_seed(Character(identity=Identity(name="ApiBot")), output_path=self.path)
+        build_cart(Character(identity=Identity(name="ApiBot")), output_path=self.path)
         pkg = cart.open(self.path)
         pkg.add_entry(
             "world", WORLD_TYPE, json.dumps({"name": "废土"}).encode(), version="1.0"

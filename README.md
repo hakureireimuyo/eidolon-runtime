@@ -1,6 +1,6 @@
 # Eidolon Runtime
 
-Eidolon 生态的**运行时层**第一版实现:通过 Web 可视化界面**加载角色卡(`.seed` / `.png`)**,并**调用 AI 模型完成最基础的角色对话**。
+Eidolon 生态的**运行时层**第一版实现:通过 Web 可视化界面**加载角色卡(`.cart` / `.png` / `.zip`)**,并**调用 AI 模型完成最基础的角色对话**。
 
 ## 在生态中的角色(边界)
 
@@ -16,13 +16,13 @@ Runtime 是**应用 / 服务**类项目,按 [`docs/environment-isolation.md`](..
 它**不重新定义数据格式**(那是资产类型层的职责),也**不重实现容器逻辑**(那是协议层的职责)——
 底层能力通过以下方式即插即用地复用:
 
-- 协议层提供容器打开能力,消费 `.seed` / `.png` 标准包
+- 协议层提供容器打开能力,消费 `.cart` / `.png` 标准包
 - 解释器(eidolon-character-service)把角色数据块解释为类型化对象并编译 prompt,组合入口按类型标签消费
 - 角色身份 = 模板；对话历史 = 运行时状态,二者严格分离
 
 ## 功能(V1 最小可用闭环)
 
-- ✅ 上传并加载角色卡(`.seed` / `.png` / `.zip`),展示角色设定与立绘
+- ✅ 上传并加载角色卡(`.cart` / `.png` / `.zip`),展示角色设定与立绘
 - ✅ 基于角色设定自动构建 system prompt
 - ✅ 调用 AI 模型,进行最基础的一问一答对话(维护上下文历史)
 - ✅ 清空对话 / 重新加载
@@ -54,14 +54,12 @@ eidolon-runtime/
 
 ```bash
 cd eidolon-runtime
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-pip install -r requirements.txt
+uv sync          # 首次:创建 .venv 并安装依赖(含测试依赖)
 ```
 
-> 协议层、资产类型层与解释器均通过 uv workspace 在 `pyproject.toml`
-> 中声明为正规依赖,无需 `sys.path` 注入。加载工程包走数据解析容器
+> 协议层(cartridge)、资产类型层(eidolon-character)与解释器(eidolon-character-service)
+> 均在 `pyproject.toml` 中以 **git 源(pin rev)** 声明为正规第三方依赖,无需
+> `sys.path` 注入,monorepo 检出与独立 clone 行为一致。加载工程包走数据解析容器
 > `runtime.resources`(打开一次、全量解析),角色数据块经
 > `eidolon-character-service`(解释器)按类型标签路由解释;
 > 组合层不直接 import 格式层。
@@ -125,23 +123,25 @@ OpenAI 风格多模态内容块,数据模型层面视觉能力已就绪。
 ### 3. 启动
 
 ```bash
-uvicorn backend.main:app --reload --port 8000
+bash scripts/start.sh        # 一键启动(默认端口 8010,与 Studio 的 8000 错开;停止:bash scripts/start.sh stop)
+# 或手动:
+uv run uvicorn backend.main:app --reload --port 8000
 ```
 
-打开 http://localhost:8000 :
+打开 http://127.0.0.1:8010 (手动启动则为 8000):
 0. (首次)点击右上角「设置」填入 API Key / 模型等信息并保存(写入 `config.toml`),否则对话会返回 503 提示未配置；
-1. 右上角「加载角色卡」选一个 `.seed` / `.png`(可用 `python -m examples.make_sample` 生成 `alice.seed`)；
+1. 右上角「加载角色卡」选一个 `.cart` / `.png`(可用 `uv run python -m examples.make_sample` 生成示例包 `alice.cart`)；
 2. 角色设定与立绘出现在左侧,右侧出现问候语；
 3. 在输入框与角色对话。
 
 ## 测试
 
 ```bash
-python -m unittest discover -s tests -t .
+uv run python -m unittest discover -s tests -t .
 ```
 
 ## 设计要点
 
-- **协议无知 / 扩展层复用**:运行时完全不感知 `.seed` 内部结构,只消费通用 `Package` 与 `Character`。
+- **协议无知 / 扩展层复用**:运行时完全不感知 `.cart` 内部结构,只消费通用 `Package` 与 `Character`。
 - **运行时状态隔离**:`Character` 是模板,`RuntimeEngine.history` 是会话级可变状态,不回写角色卡。
 - **LLM 可插拔**:对话逻辑与具体模型解耦,换厂商只改环境变量。

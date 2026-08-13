@@ -12,14 +12,16 @@ dependencies = [
     "eidolon-character-service",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 # 生产代码只消费解释器(eidolon-character-service);格式层(eidolon-character)
 # 仅测试夹具构造时直接使用,故放在 dev。
-dev = ["pytest", "eidolon-character"]
+dev = ["pytest", "httpx", "eidolon-character"]
 
 [tool.setuptools.packages.find]
 include = ["runtime*", "backend*"]
 
+# 兄弟库以第三方库方式安装:git 源 + pin rev,monorepo 与独立 clone 一致。
+# 库升级 = 库仓 commit+push 后更新此处 rev(与顶层子模块指针同源)。
 [tool.uv.sources]
-eidolon-character = { workspace = true }
-eidolon-character-service = { workspace = true }
+eidolon-character = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git", rev = "8f04159ec4710b334b86a825c41b71998083ca34" }
+eidolon-character-service = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git", rev = "750437ce1ad47899af878e20398343d7e2da886b" }

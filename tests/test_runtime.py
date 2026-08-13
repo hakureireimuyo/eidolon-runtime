@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from eidolon_character.builder import build_seed
+from eidolon_character.builder import build_cart
 from eidolon_character.model import Character, CharacterAsset, Dialogue, Identity
 from eidolon_character_service import build_system_prompt, CharacterLoadError
 
@@ -63,7 +63,7 @@ class TestRuntime(unittest.TestCase):
         c = _sample_character()
         fd, path = tempfile.mkstemp(suffix=".seed")
         os.close(fd)
-        build_seed(c, output_path=path)
+        build_cart(c, output_path=path)
         return path
 
     def test_load_character(self):
@@ -91,7 +91,7 @@ class TestRuntime(unittest.TestCase):
         png = b"\x89PNG\r\n\x1a\nfake-bytes"
         fd, path = tempfile.mkstemp(suffix=".seed")
         os.close(fd)
-        build_seed(c, images={"portrait": png}, output_path=path)
+        build_cart(c, images={"portrait": png}, output_path=path)
         try:
             eng = RuntimeEngine()
             info = eng.load(path)
@@ -311,7 +311,7 @@ class TestEngineWithGateway(unittest.TestCase):
         c = _sample_character()
         fd, path = tempfile.mkstemp(suffix=".seed")
         os.close(fd)
-        build_seed(c, output_path=path)
+        build_cart(c, output_path=path)
         return path
 
     def test_chat_with_mock_service(self):
@@ -447,7 +447,7 @@ class TestAssetAPI(unittest.TestCase):
         png = b"\x89PNG\r\n\x1a\napi-bytes"
         fd, path = tempfile.mkstemp(suffix=".seed")
         os.close(fd)
-        build_seed(c, images={"portrait": png}, output_path=path)
+        build_cart(c, images={"portrait": png}, output_path=path)
         try:
             with open(path, "rb") as f:
                 r = self.client.post(
