@@ -97,7 +97,7 @@
   <span class="tag">运行时层 · 加载角色卡 + 最基础对话</span>
   <span class="spacer"></span>
   <label class="filebtn">加载角色卡
-    <input type="file" id="fileInput" accept=".seed,.png,.zip" />
+    <input type="file" id="fileInput" accept=".cart,.png,.zip" />
   </label>
   <button class="ghost" id="settingsBtn">设置</button>
   <button class="ghost" id="resetBtn">清空对话</button>
@@ -108,7 +108,7 @@
 
 <main>
   <aside class="card-panel" id="cardPanel">
-    <div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .seed / .png 文件。</div>
+    <div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .cart / .png 文件。</div>
   </aside>
 
   <section class="chat-panel">
@@ -185,7 +185,7 @@ function pickPortrait(info) {
 function renderCard(info) {
   const panel = $("#cardPanel");
   if (!info || !info.loaded) {
-    panel.innerHTML = '<div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .seed / .png 文件。</div>';
+    panel.innerHTML = '<div class="empty">尚未加载角色。<br/>点击右上角「加载角色卡」选择一个 .cart / .png 文件。</div>';
     return;
   }
   const portraitId = pickPortrait(info);
