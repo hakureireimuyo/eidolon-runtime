@@ -12,6 +12,7 @@
 #
 # 未配置 API Key 时界面仍可打开、角色卡可加载,发起对话会返回 503 提示(见 README)。
 # 日志:workspace/logs/runtime.log(workspace 已 gitignore)
+# 开发者工具默认开启(/devtools);如需关闭:EIDOLON_RUNTIME_DEVTOOLS=0 bash scripts/start.sh
 #
 # 依赖:uv。首次运行自动创建本仓 .venv 并安装依赖(git 源 pin rev,见 README);
 #      本脚本在 monorepo 检出与独立 clone 两种形态下均可直接使用。
@@ -107,7 +108,8 @@ start() {
     : >"$LOG_DIR/runtime.log"
 
     echo "[runtime] 启动服务:$URL(日志:$LOG_DIR/runtime.log)"
-    (cd "$REPO" && exec uv run uvicorn backend.main:app --host 127.0.0.1 --port "$PORT") \
+    (cd "$REPO" && EIDOLON_RUNTIME_DEVTOOLS="${EIDOLON_RUNTIME_DEVTOOLS:-1}" \
+        exec uv run uvicorn backend.main:app --host 127.0.0.1 --port "$PORT") \
         >>"$LOG_DIR/runtime.log" 2>&1 &
     PID=$!
 

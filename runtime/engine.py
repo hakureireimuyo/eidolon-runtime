@@ -11,6 +11,8 @@ engine 只负责:
 3. 编译上下文 → 通过 gateway 发送 → 取回回复
 4. 回复加入对话缓冲 → 返回
 
+多会话(QQ 式多角色):每个已加载角色一份 Session(独立上下文 + 独立
+对话历史),按角色名 key 索引,同名重载即替换;select() 切换当前会话。
 角色身份 = 模板(永久定义),对话历史 = 运行时状态,二者严格分离。
 包中没有角色数据块时加载照常成功(character=None),仅对话时要求角色。
 """
@@ -49,9 +51,30 @@ class ChatMessage:
     ts: float = field(default_factory=time.time)
 
 
-class RuntimeEngine:
-    """一个运行时会话:持有一个已加载角色 + 一段对话历史。
+@dataclass
+class Session:
+    """一个已加载角色的会话:包视图 + 独立上下文与独立对话历史。
 
+    角色身份 = 模板(永久定义),对话历史 = 运行时状态,二者严格分离;
+    每个角色一份 Session 互不干扰,key 为角色名(同名重载即替换该会话)。
+    """
+
+    key: str
+    space: ResourceSpace
+    bundle: Optional[CharacterBundle]
+    character: Any
+    assets: dict[str, bytes]
+    asset_types: dict[str, Optional[str]]
+    manifest: dict
+    context: ContextManager
+    history: list[ChatMessage] = field(default_factory=list)
+
+
+class RuntimeEngine:
+    """一个运行时会话集合:持有多个已加载角色 + 各自的对话历史。
+
+    每个角色一份 Session(独立上下文 + 独立历史),按角色名 key 索引,
+    同名重载即替换;select() 切换当前会话,对话/重置只作用于当前会话。
     通过 LLMGateway + ContextManager 两层抽象与 LLM 交互,
     不直接操作 messages 拼接或 provider 选择。
     """
@@ -65,21 +88,23 @@ class RuntimeEngine:
         gateway: LLMGateway | None = None,
         context: ContextManager | None = None,
     ) -> None:
+        # 多会话:key → Session(QQ 式多角色列表)
+        self._sessions: dict[str, Session] = {}
+        self._active_key: Optional[str] = None
         self.space: Optional[ResourceSpace] = None
         self.bundle: Optional[CharacterBundle] = None
         self.character = None
-        # 以下均为 space/bundle 的派生兼容视图(backend 与历史调用方继续可用)
+        # 以下均为当前会话 space/bundle 的派生兼容视图(backend 与历史调用方继续可用)
         self.assets: dict[str, bytes] = {}
         self.asset_types: dict[str, Optional[str]] = {}
         self.manifest: dict = {}
 
-        # 两层抽象:LLM 网关 + 上下文管理器
+        # 两层抽象:LLM 网关(全引擎共享)+ 上下文管理器(每会话一份)
         self._gateway = gateway or LLMGateway()
         self._context = context or ContextManager()
 
-        # 对话历史(向后兼容 history 属性)
-        # 实际数据存储在 ContextManager 的 ConversationBuffer 中,
-        # 此列表作为只读镜像供外部消费。
+        # 对话历史(向后兼容 history 属性)——当前会话历史的引用视图,
+        # 实际数据存储在各会话自己的 ContextManager 中。
         self.history: list[ChatMessage] = []
 
     # ---- 加载 ----
@@ -90,27 +115,99 @@ class RuntimeEngine:
             space = load_package(path)
         except Exception as exc:  # noqa: BLE001 - 非 Cartridge 包 / 文件不可读
             raise CharacterLoadError(f"无法打开包:{exc}") from exc
-        self.space = space
 
         record = space.first(CHARACTER_TYPE, typed_only=True)
-        self.bundle = (
+        bundle = (
             space.context.extras.get("character_bundle")
             if record is not None
             else None
         )
-        self.character = record.value if record is not None else None
+        character = record.value if record is not None else None
         # 派生兼容视图:媒体字节已在容器内存中,零拷贝
-        self.assets = dict(space.media)
-        self.asset_types = dict(space.media_types)
-        self.manifest = space.manifest
+        assets = dict(space.media)
+        asset_types = dict(space.media_types)
+        manifest = space.manifest
 
-        # 有角色才设置 static 上下文;两分支都重置对话(每次加载都是新会话)
-        if self.character is not None:
-            system_prompt = build_system_prompt(self.character)
-            self._context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
-        self._context.reset_conversation()
-        self.history = []
+        # 会话 key:角色名优先,无角色数据块回退包名 / 占位(同名重载即替换)
+        key = (
+            (character.identity.name if character is not None else None)
+            or space.name
+            or "未命名"
+        )
+
+        # 新会话:独立上下文 + 空历史(每次加载都是新会话)
+        context = ContextManager()
+        if character is not None:
+            system_prompt = build_system_prompt(character)
+            context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
+
+        session = Session(
+            key=key,
+            space=space,
+            bundle=bundle,
+            character=character,
+            assets=assets,
+            asset_types=asset_types,
+            manifest=manifest,
+            context=context,
+        )
+        self._sessions[key] = session
+        self._activate(session)
         return self.character_info()
+
+    # ---- 会话切换(多角色) ----
+
+    def _activate(self, session: Session) -> None:
+        """把会话视图同步到引擎的兼容属性(引用共享,零拷贝)。"""
+        self._active_key = session.key
+        self.space = session.space
+        self.bundle = session.bundle
+        self.character = session.character
+        self.assets = session.assets
+        self.asset_types = session.asset_types
+        self.manifest = session.manifest
+        self._context = session.context
+        self.history = session.history
+
+    def select(self, key: str) -> dict:
+        """切换到指定会话(按角色名 key),返回该角色的信息与历史。"""
+        session = self._sessions.get(key)
+        if session is None:
+            raise CharacterLoadError(f"未找到会话:{key}")
+        self._activate(session)
+        return self.character_info()
+
+    def characters(self) -> list[dict]:
+        """已加载角色列表(侧栏用):附头像 data URI(内存实例直出)。"""
+        out: list[dict] = []
+        for key, s in self._sessions.items():
+            if s.character is None:
+                continue
+            c = s.character.identity
+            out.append(
+                {
+                    "key": key,
+                    "name": c.name,
+                    "nickname": c.nickname,
+                    "avatar": self._avatar_uri(s.bundle),
+                    "active": key == self._active_key,
+                }
+            )
+        return out
+
+    @staticmethod
+    def _avatar_uri(bundle: Optional[CharacterBundle]) -> Optional[str]:
+        """侧栏头像:purpose 依次 avatar → portrait → cover,再任意图片。"""
+        if bundle is None:
+            return None
+        for getter in (bundle.get_avatar, bundle.get_portrait, bundle.get_cover):
+            ad = getter()
+            if ad is not None and ad.data is not None:
+                return ad.data_uri()
+        for ad in bundle.assets.values():
+            if ad.data is not None and (ad.type or "").startswith("image/"):
+                return ad.data_uri()
+        return None
 
     # ---- 角色卡信息(供前端展示) ----
 
@@ -124,6 +221,11 @@ class RuntimeEngine:
                 include_data=include_data,
             )
         info["package"] = self._package_summary()
+        if self._active_key is not None:
+            info["key"] = self._active_key
+            info["history"] = [
+                {"role": m.role, "content": m.content} for m in self.history
+            ]
         return info
 
     def _package_summary(self) -> Optional[dict]:
@@ -187,9 +289,9 @@ class RuntimeEngine:
     # ---- 对话历史 ----
 
     def reset(self) -> None:
-        """清空对话历史(保留已加载角色和静态上下文)。"""
+        """清空当前会话的对话历史(保留已加载角色和静态上下文)。"""
         self._context.reset_conversation()
-        self.history = []
+        self.history.clear()  # 引用视图:清空会话自己的历史列表
 
     def chat(self, user_message: str) -> dict:
         """处理一条用户消息,返回模型回复与对话历史。

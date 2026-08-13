@@ -28,7 +28,7 @@ app = FastAPI(title="Eidolon Runtime", version="0.1.0")
 # 托管前端静态资源(单页应用自包含,目录主要用于 index.html)
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR), check_dir=False), name="static")
 
-# 全局单会话引擎(V1:一次加载一个角色；重新加载即替换)
+# 全局引擎:多会话(一次可加载多个角色,同名重载即替换该会话)
 engine = RuntimeEngine()
 
 
@@ -82,9 +82,27 @@ async def chat(payload: dict):
 
 @app.post("/api/reset")
 def reset():
-    """清空对话历史(保留已加载角色)。"""
+    """清空当前会话的对话历史(保留已加载角色)。"""
     engine.reset()
     return {"ok": True, "history": []}
+
+
+@app.get("/api/characters")
+def list_characters():
+    """已加载角色列表(侧栏):key / name / nickname / 头像 data URI。"""
+    return {"characters": engine.characters()}
+
+
+@app.post("/api/select")
+def select(payload: dict):
+    """切换当前会话(按角色名 key),返回该角色的信息与历史。"""
+    key = (payload or {}).get("key")
+    if not key:
+        raise HTTPException(status_code=400, detail="key 不能为空")
+    try:
+        return engine.select(key)
+    except CharacterLoadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/settings")
@@ -127,6 +145,12 @@ async def put_settings(payload: dict):
             "has_api_key": bool(saved.get("api_key")),
         },
     }
+
+
+@app.get("/api/meta")
+def meta():
+    """运行时元信息(供前端按开关显隐功能,如开发者工具按钮)。"""
+    return {"devtools": DEVTOOLS_ENABLED}
 
 
 @app.get("/api/asset/{asset_id}")
