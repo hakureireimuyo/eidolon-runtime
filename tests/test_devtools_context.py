@@ -4,23 +4,19 @@
 - capture:快照结构与 hash 计算
 - 一致性:布局单元与 ContextCompiler.compile() 输出等价(锁定编译规则)
 - diff:对话对齐(追加 / 截断 / 同时)、前缀缓存命中判定、首个变化点
-- API:previous 自动推进、baseline 流程、segment/turn/messages 端点
-- 开关解析与内存态边界(新 router = 无历史,模拟进程重启)
+- 开关解析
+
+注:端点层(previous 推进 / baseline 流程 / segment/turn/messages)的测试
+随「会话×生成器」维度重构删除——端点是实现细节层,职责边界稳定后再按
+docs/testing-strategy.md 补测。
 """
 from __future__ import annotations
 
-import os
-import tempfile
 import unittest
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from runtime.config import _parse_devtools_flag
 from runtime.context import ContextLayer, ContextManager, ContextSegment
-from runtime.engine import RuntimeEngine
 
-from backend.devtools import build_router
 from backend.devtools.context_inspector import (
     _align_turns,
     capture,
@@ -217,125 +213,6 @@ class TestDevtoolsFlag(unittest.TestCase):
             self.assertTrue(_parse_devtools_flag(value), value)
         for value in ("", "0", "false", "no", "off", "anything"):
             self.assertFalse(_parse_devtools_flag(value), value)
-
-
-class TestDevtoolsApi(unittest.TestCase):
-    """API 测试:裸 FastAPI + build_router,不 import backend.main.app(避免污染全局 engine)。"""
-
-    def setUp(self):
-        self._cfg = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
-        self._cfg.close()
-        os.environ["EIDOLON_RUNTIME_CONFIG"] = self._cfg.name
-        self._make_client()
-
-    def _make_client(self):
-        self.engine = RuntimeEngine()
-        app = FastAPI()
-        app.include_router(build_router(self.engine))
-        self.client = TestClient(app)
-
-    def tearDown(self):
-        os.environ.pop("EIDOLON_RUNTIME_CONFIG", None)
-        try:
-            os.unlink(self._cfg.name)
-        except OSError:
-            pass
-
-    def _seed(self):
-        mgr = self.engine.context_manager
-        mgr.set_static("character_prompt", "人格")
-        mgr.set_high("emotion", "平静")
-
-    def test_first_get_writes_previous(self):
-        r = self.client.get("/api/devtools/context")
-        self.assertEqual(r.status_code, 200)
-        d = r.json()
-        self.assertEqual(d["vs_previous"], {"reason": "no_previous"})
-        self.assertEqual(d["vs_baseline"], {"reason": "no_baseline"})
-        self.assertFalse(d["baseline_set"])
-        self.assertIsNone(d["previous_at"])
-        # 第二次 GET 已有 previous(自动推进语义)
-        d2 = self.client.get("/api/devtools/context").json()
-        self.assertIn("units", d2["vs_previous"])
-        self.assertTrue(d2["vs_previous"]["prefix_cache_hit"])
-
-    def test_diff_after_context_change(self):
-        self._seed()
-        self.client.get("/api/devtools/context")
-        self.engine.context_manager.set_static("character_prompt", "人格 v2")
-        d = self.client.get("/api/devtools/context").json()
-        self.assertFalse(d["vs_previous"]["prefix_cache_hit"])
-        self.assertEqual(d["vs_previous"]["prefix_break_reason"], "segment_changed")
-
-    def test_baseline_flow(self):
-        self._seed()
-        r = self.client.post("/api/devtools/context/baseline")
-        self.assertEqual(r.status_code, 200)
-        d = self.client.get("/api/devtools/context").json()
-        self.assertTrue(d["baseline_set"])
-        self.assertIn("units", d["vs_baseline"])
-        # 修改后 vs baseline 显示 miss
-        self.engine.context_manager.set_static("character_prompt", "人格 v2")
-        d2 = self.client.get("/api/devtools/context").json()
-        self.assertFalse(d2["vs_baseline"]["prefix_cache_hit"])
-        # 清除
-        self.assertEqual(self.client.delete("/api/devtools/context/baseline").status_code, 200)
-        self.assertFalse(self.client.get("/api/devtools/context").json()["baseline_set"])
-        self.assertEqual(self.client.delete("/api/devtools/context/baseline").status_code, 404)
-
-    def test_segment_endpoint(self):
-        self._seed()
-        r = self.client.get("/api/devtools/context/segment/character_prompt?against=previous")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["current_text"], "人格")
-        self.assertIsNone(r.json()["previous_text"])
-        # 推进 previous 后修改,带出旧文本与状态
-        self.client.get("/api/devtools/context")
-        self.engine.context_manager.set_static("character_prompt", "人格 v2")
-        d = self.client.get("/api/devtools/context/segment/character_prompt?against=previous").json()
-        self.assertEqual(d["status"], "changed")
-        self.assertEqual(d["previous_text"], "人格")
-        self.assertEqual(d["current_text"], "人格 v2")
-        # 404 与非法 against
-        self.assertEqual(self.client.get("/api/devtools/context/segment/nope").status_code, 404)
-        self.assertEqual(
-            self.client.get("/api/devtools/context/segment/character_prompt?against=bogus").status_code,
-            400,
-        )
-
-    def test_turn_endpoint(self):
-        mgr = self.engine.context_manager
-        mgr.add_message("user", "你好")
-        mgr.add_message("assistant", "你好呀")
-        d = self.client.get("/api/devtools/context/turn/-1").json()
-        self.assertEqual(d["text"], "你好呀")
-        self.assertEqual(d["role"], "assistant")
-        d0 = self.client.get("/api/devtools/context/turn/0").json()
-        self.assertEqual(d0["text"], "你好")
-        self.assertEqual(self.client.get("/api/devtools/context/turn/-3").status_code, 404)
-        self.assertEqual(self.client.get("/api/devtools/context/turn/2").status_code, 404)
-
-    def test_messages_endpoint(self):
-        self._seed()
-        mgr = self.engine.context_manager
-        mgr.add_message("user", "你好")
-        d = self.client.get("/api/devtools/context/messages").json()
-        expected = mgr.compile()
-        self.assertEqual([m["content"] for m in d["messages"]], [m["content"] for m in expected])
-        self.assertEqual(d["count"], len(expected))
-        self.assertTrue(d["notes"])
-
-    def test_state_is_memory_only(self):
-        """新 router/引擎无任何历史 —— 状态只存内存(模拟进程重启)。"""
-        self._seed()
-        self.client.get("/api/devtools/context")
-        self.client.post("/api/devtools/context/baseline")
-        self.assertTrue(self.client.get("/api/devtools/context").json()["baseline_set"])
-        # 重建 router/engine(新进程)
-        self._make_client()
-        d = self.client.get("/api/devtools/context").json()
-        self.assertEqual(d["vs_previous"], {"reason": "no_previous"})
-        self.assertFalse(d["baseline_set"])
 
 
 if __name__ == "__main__":

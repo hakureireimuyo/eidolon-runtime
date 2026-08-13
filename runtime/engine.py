@@ -1,19 +1,20 @@
 """对话引擎:运行时组合层的会话核心。
 
-重构后架构(两层抽象):
-- ContextManager 管理上下文分层 + 编译 messages(不再手拼)
-- LLMGateway 封装底层 LLM provider 差异(不再直接调 llm_chat)
+架构(三层抽象):
+- 生成器层(runtime.generators)把 LLM 调度封装为独立可输入输出的对象,
+  每个生成器自管理自己的 ContextManager;
+- ContextManager 管理上下文分层 + 编译 messages(不再手拼);
+- LLMGateway 封装底层 LLM provider 差异(不再直接调 llm_chat)。
 
 engine 只负责:
 1. 加载工程包(经数据解析容器 runtime.resources 打开一次、全量解析)
-   → 取角色资源(容器中按类型标签取到的一个数据对象)→ 设置 static 上下文
-2. 接收用户输入 → 加入对话缓冲
-3. 编译上下文 → 通过 gateway 发送 → 取回回复
-4. 回复加入对话缓冲 → 返回
+   → 取角色资源(容器中按类型标签取到的一个数据对象)
+   → 构造会话及其生成器(当前:角色对话生成器)
+2. 会话管理:select() 切换当前会话,chat/reset 委托当前会话的生成器
 
-多会话(QQ 式多角色):每个已加载角色一份 Session(独立上下文 + 独立
-对话历史),按角色名 key 索引,同名重载即替换;select() 切换当前会话。
-角色身份 = 模板(永久定义),对话历史 = 运行时状态,二者严格分离。
+多会话(QQ 式多角色):每个已加载角色一份 Session(独立生成器集合 +
+独立对话历史),按角色名 key 索引,同名重载即替换。角色身份 = 模板
+(永久定义),对话历史 = 运行时状态,二者严格分离。
 包中没有角色数据块时加载照常成功(character=None),仅对话时要求角色。
 """
 from __future__ import annotations
@@ -28,14 +29,14 @@ from eidolon_character_service import (
     build_system_prompt,
     character_info as build_character_info,
 )
+from .generators import Generator, DialogueGenerator
 from .resources import (
     CHARACTER_TYPE,
     ResourceRecord,
     ResourceSpace,
     load_package,
 )
-from .llm import LLMUnconfigured, LLMError
-from .llm_gateway import LLMGateway, LLMRequest
+from .llm_gateway import LLMGateway
 from .context import ContextManager
 
 # 重新导出,保持原有 API 兼容
@@ -53,8 +54,10 @@ class ChatMessage:
 
 @dataclass
 class Session:
-    """一个已加载角色的会话:包视图 + 独立上下文与独立对话历史。
+    """一个已加载角色的会话:包视图 + 生成器集合 + 独立对话历史。
 
+    会话是高于 LLM 会话的一层概念:一个角色对应一个会话,会话下挂
+    多个生成器(当前仅角色对话生成器),每个生成器自管理自己的上下文。
     角色身份 = 模板(永久定义),对话历史 = 运行时状态,二者严格分离;
     每个角色一份 Session 互不干扰,key 为角色名(同名重载即替换该会话)。
     """
@@ -66,28 +69,20 @@ class Session:
     assets: dict[str, bytes]
     asset_types: dict[str, Optional[str]]
     manifest: dict
-    context: ContextManager
+    generators: dict[str, Generator] = field(default_factory=dict)
     history: list[ChatMessage] = field(default_factory=list)
 
 
 class RuntimeEngine:
-    """一个运行时会话集合:持有多个已加载角色 + 各自的对话历史。
+    """一个运行时会话集合:持有多个已加载角色 + 各自的生成器与历史。
 
-    每个角色一份 Session(独立上下文 + 独立历史),按角色名 key 索引,
-    同名重载即替换;select() 切换当前会话,对话/重置只作用于当前会话。
-    通过 LLMGateway + ContextManager 两层抽象与 LLM 交互,
-    不直接操作 messages 拼接或 provider 选择。
+    每个角色一份 Session(独立生成器集合 + 独立历史),按角色名 key
+    索引,同名重载即替换;select() 切换当前会话,对话/重置只作用于
+    当前会话。LLM 调度(上下文管理 + 网关调用)全部封装在生成器层,
+    engine 只按生成器接口收发数据。
     """
 
-    # 上下文片段的语义标签(用于 ContextManager 内部标识)
-    _TAG_CHARACTER_PROMPT = "character_prompt"
-
-    def __init__(
-        self,
-        *,
-        gateway: LLMGateway | None = None,
-        context: ContextManager | None = None,
-    ) -> None:
+    def __init__(self, *, gateway: LLMGateway | None = None) -> None:
         # 多会话:key → Session(QQ 式多角色列表)
         self._sessions: dict[str, Session] = {}
         self._active_key: Optional[str] = None
@@ -99,12 +94,15 @@ class RuntimeEngine:
         self.asset_types: dict[str, Optional[str]] = {}
         self.manifest: dict = {}
 
-        # 两层抽象:LLM 网关(全引擎共享)+ 上下文管理器(每会话一份)
+        # LLM 网关(全引擎共享、无状态);生成器按会话各自持有上下文
         self._gateway = gateway or LLMGateway()
-        self._context = context or ContextManager()
+        # 当前会话的对话生成器(兼容视图同步目标;未加载任何会话时为 None)
+        self._current_generator: Optional[Generator] = None
+        # 兼容视图:当前生成器的上下文(devtools 旧入口/历史调用方继续可用)
+        self._context: ContextManager = ContextManager()
 
         # 对话历史(向后兼容 history 属性)——当前会话历史的引用视图,
-        # 实际数据存储在各会话自己的 ContextManager 中。
+        # 实际数据存储在会话自己的对话生成器上下文中。
         self.history: list[ChatMessage] = []
 
     # ---- 加载 ----
@@ -135,11 +133,16 @@ class RuntimeEngine:
             or "未命名"
         )
 
-        # 新会话:独立上下文 + 空历史(每次加载都是新会话)
-        context = ContextManager()
+        # 新会话:生成器集合 + 空历史(每次加载都是新会话)。
+        # 当前仅角色对话生成器;未来剧情/环境生成器在此登记。
+        generators: dict[str, Generator] = {}
         if character is not None:
-            system_prompt = build_system_prompt(character)
-            context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
+            gen = DialogueGenerator(
+                character,
+                gateway=self._gateway,
+                system_prompt=build_system_prompt(character),
+            )
+            generators[gen.id] = gen
 
         session = Session(
             key=key,
@@ -149,7 +152,7 @@ class RuntimeEngine:
             assets=assets,
             asset_types=asset_types,
             manifest=manifest,
-            context=context,
+            generators=generators,
         )
         self._sessions[key] = session
         self._activate(session)
@@ -166,7 +169,12 @@ class RuntimeEngine:
         self.assets = session.assets
         self.asset_types = session.asset_types
         self.manifest = session.manifest
-        self._context = session.context
+        self._current_generator = session.generators.get(DialogueGenerator.id)
+        self._context = (
+            self._current_generator.context
+            if self._current_generator is not None
+            else ContextManager()
+        )
         self.history = session.history
 
     def select(self, key: str) -> dict:
@@ -290,60 +298,22 @@ class RuntimeEngine:
 
     def reset(self) -> None:
         """清空当前会话的对话历史(保留已加载角色和静态上下文)。"""
-        self._context.reset_conversation()
+        if self._current_generator is not None:
+            self._current_generator.reset()
         self.history.clear()  # 引用视图:清空会话自己的历史列表
 
     def chat(self, user_message: str) -> dict:
-        """处理一条用户消息,返回模型回复与对话历史。
-
-        流程:
-        1. 将用户消息加入上下文管理器(高频层)
-        2. 编译上下文为 messages(缓存友好布局)
-        3. 通过 LLM Gateway 发送请求
-        4. 将回复加入上下文管理器
-        5. 同步 history 镜像并返回
-        """
+        """处理一条用户消息,返回模型回复与对话历史(委托角色对话生成器)。"""
         if self.character is None:
             raise CharacterLoadError("尚未加载角色卡,请先加载 .cart / .png。")
-
-        # 1. 用户消息进入上下文
-        self._context.add_message("user", user_message)
-        self.history.append(ChatMessage(role="user", content=user_message))
-
-        # 2. 编译上下文 → messages
-        messages = self._context.compile()
-
-        # 3. 通过 Gateway 发送
-        request = LLMRequest(messages=messages)
-        try:
-            response = self._gateway.complete(request)
-        except LLMUnconfigured:
-            # 回滚:移除刚加入的用户消息(因为没有得到回复)
-            self._context.reset_conversation()
-            # 重新加入已有的历史(不含刚才那条)
-            for m in self.history[:-1]:
-                self._context.add_message(m.role, m.content)
-            # 移除 history 末尾
-            self.history.pop()
-            raise
-        except LLMError:
-            # 同上回滚
-            self._context.reset_conversation()
-            for m in self.history[:-1]:
-                self._context.add_message(m.role, m.content)
-            self.history.pop()
-            raise
-
-        # 4. 回复进入上下文
-        self._context.add_message("assistant", response.content)
-        self.history.append(ChatMessage(role="assistant", content=response.content))
-
-        return {
-            "reply": response.content,
-            "history": [
-                {"role": m.role, "content": m.content} for m in self.history
-            ],
-        }
+        assert self._current_generator is not None  # character 非空 ⇒ 对话生成器存在
+        result = self._current_generator.generate({"message": user_message})
+        # 同步 history 镜像(就地重填,保持会话历史列表的引用一致)
+        self.history[:] = [
+            ChatMessage(role=m["role"], content=m["content"])
+            for m in result["history"]
+        ]
+        return result
 
     # ---- 诊断信息 ----
 
@@ -357,5 +327,47 @@ class RuntimeEngine:
 
     @property
     def context_manager(self) -> ContextManager:
-        """上下文管理器(只读入口,供诊断与开发者工具读取上下文状态)。"""
+        """当前会话对话生成器的上下文(兼容入口;devtools 请用 resolve_generator)。"""
         return self._context
+
+    # ---- 生成器视图(开发者工具只读入口) ----
+
+    @property
+    def active_key(self) -> Optional[str]:
+        """当前激活会话 key(未加载任何会话时为 None)。"""
+        return self._active_key
+
+    def session_keys(self) -> list[str]:
+        """全部会话 key(加载顺序)。"""
+        return list(self._sessions)
+
+    def session_generators(self, session_key: str) -> list[dict]:
+        """指定会话的生成器清单(开发者工具选择器数据源)。"""
+        session = self._sessions.get(session_key)
+        if session is None:
+            raise CharacterLoadError(f"未找到会话:{session_key}")
+        out: list[dict] = []
+        for gen in session.generators.values():
+            ctx = gen.context
+            out.append(
+                {
+                    "id": gen.id,
+                    "label": gen.label,
+                    "turns": len(ctx.conversation_turns),
+                    "segment_count": len(ctx.ir),
+                    "segment_chars": ctx.ir.total_text_length,
+                }
+            )
+        return out
+
+    def resolve_generator(self, session_key: str, generator_id: str) -> Generator:
+        """按 会话 key + 生成器 id 解析生成器(开发者工具用)。"""
+        session = self._sessions.get(session_key)
+        if session is None:
+            raise CharacterLoadError(f"未找到会话:{session_key}")
+        gen = session.generators.get(generator_id)
+        if gen is None:
+            raise CharacterLoadError(
+                f"会话 {session_key} 无生成器:{generator_id}"
+            )
+        return gen

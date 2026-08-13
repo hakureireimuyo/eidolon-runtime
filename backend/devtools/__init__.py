@@ -7,16 +7,19 @@
 - 只读诊断:绝不修改引擎 / 上下文 / 任何运行时状态;
 - 状态只存内存:previous / baseline 快照等只保存在进程内闭包变量,
   不写任何文件,进程重启即清空;
+- 以「会话 × 生成器」为维度:会话是高于 LLM 会话的一层概念,一个会话
+  下挂多个生成器(当前仅角色对话生成器),previous / baseline 按维度隔离;
 - 新增工具:在 frontend/devtools/index.html 的卡片数组登记,
   路由在本包内扩展(按工具拆模块,与 context_inspector 同构)。
 """
 from __future__ import annotations
 
 import threading
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 
-from runtime.engine import RuntimeEngine
+from runtime.engine import CharacterLoadError, RuntimeEngine
 
 from .context_inspector import (
     CHANGED,
@@ -32,23 +35,59 @@ from .context_inspector import (
 def build_router(engine: RuntimeEngine) -> APIRouter:
     """构造 devtools 路由(闭包持有内存态 previous / baseline)。"""
     router = APIRouter(prefix="/api/devtools", tags=["devtools"])
-    # 内存态:previous 每次 GET /context 后自动推进;baseline 手动钉住。
-    state = {"previous": None, "baseline": None}
+    # 内存态:{session_key: {generator_id: {"previous", "baseline"}}}
+    # previous 每次 GET /context 后自动推进;baseline 手动钉住。
+    state: dict[str, dict[str, dict[str, Any]]] = {}
     lock = threading.Lock()
 
-    @router.get("/context")
-    def get_context():
-        """当前上下文快照 + 与上次查看(previous)/ 基线(baseline)的 hash 对比。
+    def _resolve(engine: RuntimeEngine, session: Optional[str], generator: Optional[str]):
+        """按 query 维度解析生成器(缺省:当前激活会话 / dialogue 生成器)。"""
+        key = session or engine.active_key
+        gid = generator or "dialogue"
+        if key is None:
+            raise HTTPException(status_code=404, detail="尚未加载任何会话")
+        try:
+            return key, gid, engine.resolve_generator(key, gid)
+        except CharacterLoadError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        唯一推进 previous 的端点:响应后 previous 更新为当前状态,
+    def _cell(session_key: str, generator_id: str) -> dict:
+        """惰性取 会话×生成器 的状态格(引用稳定,内容读写仍需锁)。"""
+        with lock:
+            return state.setdefault(session_key, {}).setdefault(
+                generator_id, {"previous": None, "baseline": None}
+            )
+
+    @router.get("/sessions")
+    def list_sessions():
+        """会话 × 生成器概览(前端选择器数据源)。"""
+        sessions = []
+        for key in engine.session_keys():
+            sessions.append(
+                {
+                    "key": key,
+                    "active": key == engine.active_key,
+                    "generators": engine.session_generators(key),
+                }
+            )
+        return {"sessions": sessions}
+
+    @router.get("/context")
+    def get_context(session: Optional[str] = None, generator: Optional[str] = None):
+        """指定 会话×生成器 的上下文快照 + 与上次查看(previous)/ 基线(baseline)的 hash 对比。
+
+        唯一推进该格 previous 的端点:响应后 previous 更新为当前状态,
         因此每次轮询都得到「自上次查看以来的变化」。多标签页同时轮询会
         互相覆盖 previous(单用户 devtool,接受)。
         """
-        current = capture(engine.context_manager)
+        key, gid, gen = _resolve(engine, session, generator)
+        current = capture(gen.context)
+        cell = _cell(key, gid)
         with lock:
-            prev, base = state["previous"], state["baseline"]
-            state["previous"] = current
+            prev, base = cell["previous"], cell["baseline"]
+            cell["previous"] = current
         return {
+            "dimensions": {"session": key, "generator": gid},
             "baseline_set": base is not None,
             "captured_at": current["captured_at"],
             "current": snapshot_public(current),
@@ -63,34 +102,49 @@ def build_router(engine: RuntimeEngine) -> APIRouter:
         }
 
     @router.post("/context/baseline")
-    def set_baseline():
-        """把当前上下文钉住为基线(含全文,仅存内存)。"""
-        current = capture(engine.context_manager)
+    def set_baseline(session: Optional[str] = None, generator: Optional[str] = None):
+        """把指定 会话×生成器 的当前上下文钉住为基线(含全文,仅存内存)。"""
+        key, gid, gen = _resolve(engine, session, generator)
+        current = capture(gen.context)
+        cell = _cell(key, gid)
         with lock:
-            state["baseline"] = current
-        return {"ok": True, "captured_at": current["captured_at"]}
+            cell["baseline"] = current
+        return {
+            "dimensions": {"session": key, "generator": gid},
+            "ok": True,
+            "captured_at": current["captured_at"],
+        }
 
     @router.delete("/context/baseline")
-    def clear_baseline():
+    def clear_baseline(session: Optional[str] = None, generator: Optional[str] = None):
+        key, gid, _gen = _resolve(engine, session, generator)
+        cell = _cell(key, gid)
         with lock:
-            if state["baseline"] is None:
+            if cell["baseline"] is None:
                 raise HTTPException(status_code=404, detail="baseline 未设置")
-            state["baseline"] = None
+            cell["baseline"] = None
         return {"ok": True}
 
     @router.get("/context/segment/{tag}")
-    def get_segment(tag: str, against: str = "previous"):
+    def get_segment(
+        tag: str,
+        against: str = "previous",
+        session: Optional[str] = None,
+        generator: Optional[str] = None,
+    ):
         """单个 segment 的全文(可选带上 previous / baseline 的旧文本对照)。"""
         if against not in ("previous", "baseline"):
             raise HTTPException(
                 status_code=400,
                 detail=f"against 只支持 previous/baseline,得到 {against!r}",
             )
-        seg = engine.context_manager.get_segment(tag)
+        key, gid, gen = _resolve(engine, session, generator)
+        seg = gen.context.get_segment(tag)
         if seg is None:
             raise HTTPException(status_code=404, detail=f"segment 不存在:{tag}")
+        cell = _cell(key, gid)
         with lock:
-            basis = state[against]
+            basis = cell[against]
         previous_text = None
         status = None
         if basis is not None:
@@ -115,9 +169,14 @@ def build_router(engine: RuntimeEngine) -> APIRouter:
         }
 
     @router.get("/context/turn/{index}")
-    def get_turn(index: int):
+    def get_turn(
+        index: int,
+        session: Optional[str] = None,
+        generator: Optional[str] = None,
+    ):
         """单轮对话全文。index 为负时距尾部(-1 = 最新),为正时从最旧起算。"""
-        turns = engine.context_manager.conversation_turns
+        _key, _gid, gen = _resolve(engine, session, generator)
+        turns = gen.context.conversation_turns
         if index >= len(turns) or index < -len(turns):
             raise HTTPException(
                 status_code=404, detail=f"turn 越界:{index}(共 {len(turns)} 条)"
@@ -126,9 +185,10 @@ def build_router(engine: RuntimeEngine) -> APIRouter:
         return {"index": index, "role": t.role, "length": len(t.content), "text": t.content}
 
     @router.get("/context/messages")
-    def get_messages():
+    def get_messages(session: Optional[str] = None, generator: Optional[str] = None):
         """编译后的最终模型输入(messages 全文,与真实请求同源)。"""
-        manager = engine.context_manager
+        _key, _gid, gen = _resolve(engine, session, generator)
+        manager = gen.context
         messages = manager.compile()
         n_system_segments = sum(1 for s in manager.ir.segments if s.role == "system")
         notes = []

@@ -144,6 +144,8 @@
 <header>
   <a href="/devtools">← 工具</a>
   <h1>上下文检查器</h1>
+  <select id="sessionSel" title="会话(高于 LLM 会话的层级:一个角色一个会话,下挂多个生成器)"></select>
+  <select id="genSel" title="生成器(会话下的 LLM 调度封装,各自管理自己的上下文)"></select>
   <span class="spacer"></span>
   <span class="status" id="status">连接中…</span>
   <select id="pollSel">
@@ -231,6 +233,19 @@ let busy = false;
 let pollTimer = null;
 let messagesCache = null;
 
+// 查看维度:会话(高于 LLM 会话的层级)× 生成器(会话下的调度封装)
+const dim = { session: null, generator: null };
+let sessionsCache = [];
+
+// 所有请求统一携带维度 query;缺省时后端按当前激活会话 / dialogue 生成器解析
+function apiUrl(path, params = {}) {
+  const q = new URLSearchParams(params);
+  if (dim.session) q.set("session", dim.session);
+  if (dim.generator) q.set("generator", dim.generator);
+  const qs = q.toString();
+  return path + (qs ? "?" + qs : "");
+}
+
 function setStatus(msg, isErr) {
   const el = $("#status");
   el.textContent = msg;
@@ -245,8 +260,9 @@ async function refresh() {
   if (busy) return;
   busy = true;
   try {
-    currentData = await fetchJSON("/api/devtools/context");
-    setStatus("已连接 · " + currentData.captured_at.slice(11, 19));
+    currentData = await fetchJSON(apiUrl("/api/devtools/context"));
+    const dims = currentData.dimensions || {};
+    setStatus(`已连接 · ${dims.session || "—"} · ${dims.generator || "—"} · ` + currentData.captured_at.slice(11, 19));
     renderAll(currentData);
   } catch (e) {
     setStatus("连接失败:" + e.message, true);
@@ -425,7 +441,7 @@ function renderConversation(d) {
 // ---- 编译产物 ----
 $("#loadMessagesBtn").addEventListener("click", async () => {
   try {
-    messagesCache = await fetchJSON("/api/devtools/context/messages");
+    messagesCache = await fetchJSON(apiUrl("/api/devtools/context/messages"));
     renderMessages();
   } catch (e) {
     $("#messagesInfo").textContent = "加载失败:" + e.message;
@@ -452,8 +468,8 @@ let drawerState = null;
 
 async function openSegment(tag) {
   try {
-    const p = await fetchJSON("/api/devtools/context/segment/" + encodeURIComponent(tag) + "?against=previous");
-    const b = await fetchJSON("/api/devtools/context/segment/" + encodeURIComponent(tag) + "?against=baseline");
+    const p = await fetchJSON(apiUrl("/api/devtools/context/segment/" + encodeURIComponent(tag), { against: "previous" }));
+    const b = await fetchJSON(apiUrl("/api/devtools/context/segment/" + encodeURIComponent(tag), { against: "baseline" }));
     drawerState = {
       title: tag,
       meta: `${p.label} · ${p.role} · ${fmtChars(p.length)} 字符`,
@@ -469,7 +485,7 @@ async function openSegment(tag) {
 
 async function openTurn(index) {
   try {
-    const t = await fetchJSON("/api/devtools/context/turn/" + index);
+    const t = await fetchJSON(apiUrl("/api/devtools/context/turn/" + index));
     drawerState = {
       title: `turn:${t.index}`,
       meta: `${t.role} · ${fmtChars(t.length)} 字符`,
@@ -521,9 +537,9 @@ $("#refreshBtn").addEventListener("click", refresh);
 $("#baselineBtn").addEventListener("click", async () => {
   try {
     if (currentData && currentData.baseline_set) {
-      await fetchJSON("/api/devtools/context/baseline", { method: "DELETE" });
+      await fetchJSON(apiUrl("/api/devtools/context/baseline"), { method: "DELETE" });
     } else {
-      await fetchJSON("/api/devtools/context/baseline", { method: "POST" });
+      await fetchJSON(apiUrl("/api/devtools/context/baseline"), { method: "POST" });
     }
     await refresh();
   } catch (e) {
@@ -531,7 +547,60 @@ $("#baselineBtn").addEventListener("click", async () => {
   }
 });
 
-refresh();
+// ---- 会话 × 生成器维度 ----
+
+function resetMessagesView() {
+  messagesCache = null;
+  $("#copyAllBtn").style.display = "none";
+  $("#messages").innerHTML = "";
+  $("#messagesInfo").textContent = "";
+}
+
+async function loadSessions() {
+  try {
+    const data = await fetchJSON("/api/devtools/sessions");
+    sessionsCache = data.sessions || [];
+    const sel = $("#sessionSel");
+    const active = sessionsCache.find((s) => s.active) || sessionsCache[0];
+    sel.innerHTML = sessionsCache.map((s) =>
+      `<option value="${escapeHtml(s.key)}"${s.active ? " selected" : ""}>${escapeHtml(s.key)}</option>`).join("");
+    if (active) {
+      dim.session = active.key;
+      renderGens(active.generators);
+    } else {
+      dim.session = null;
+      $("#genSel").innerHTML = "";
+    }
+  } catch (e) {
+    setStatus("加载会话列表失败:" + e.message, true);
+  }
+}
+
+function renderGens(gens) {
+  const sel = $("#genSel");
+  const list = gens || [];
+  sel.innerHTML = list.map((g) =>
+    `<option value="${escapeHtml(g.id)}">${escapeHtml(g.label || g.id)}</option>`).join("");
+  dim.generator = list.length ? list[0].id : null;
+}
+
+$("#sessionSel").addEventListener("change", (e) => {
+  dim.session = e.target.value || null;
+  const s = sessionsCache.find((x) => x.key === dim.session);
+  renderGens(s ? s.generators : []);
+  resetMessagesView();
+  refresh();
+});
+$("#genSel").addEventListener("change", (e) => {
+  dim.generator = e.target.value || null;
+  resetMessagesView();
+  refresh();
+});
+
+(async () => {
+  await loadSessions();
+  refresh();
+})();
 </script>
 </body>
 </html>
