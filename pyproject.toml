@@ -23,5 +23,5 @@ include = ["runtime*", "backend*"]
 # 兄弟库以第三方库方式安装:git 源 + pin rev,monorepo 与独立 clone 一致。
 # 库升级 = 库仓 commit+push 后更新此处 rev(与顶层子模块指针同源)。
 [tool.uv.sources]
-eidolon-character = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git", rev = "8f04159ec4710b334b86a825c41b71998083ca34" }
+eidolon-character = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git", rev = "fd0f924d39266df5af91a587f0776c9ddde3c053" }
 eidolon-character-service = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git", rev = "14163ef3ce65d197b72e3095ddeb0a39919aa82b" }

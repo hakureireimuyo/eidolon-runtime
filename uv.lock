@@ -40,7 +40,7 @@ wheels = [
 [[package]]
 name = "cartridge"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/hakureireimuyo/cartridge.git?rev=a63e7120bd3ed54c3b34633b94b2733f7bba2c2f#a63e7120bd3ed54c3b34633b94b2733f7bba2c2f" }
+source = { git = "ssh://git@github.com/hakureireimuyo/cartridge.git?rev=efbd342a35e28721eab2f97f471d423974611cd1#efbd342a35e28721eab2f97f471d423974611cd1" }
 
 [[package]]
 name = "certifi"
@@ -84,12 +84,12 @@ wheels = [
 [[package]]
 name = "eidolon-character"
 version = "1.0.0"
-source = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git?rev=8f04159ec4710b334b86a825c41b71998083ca34#8f04159ec4710b334b86a825c41b71998083ca34" }
+source = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git?rev=fd0f924d39266df5af91a587f0776c9ddde3c053#fd0f924d39266df5af91a587f0776c9ddde3c053" }
 
 [[package]]
 name = "eidolon-character-service"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git?rev=750437ce1ad47899af878e20398343d7e2da886b#750437ce1ad47899af878e20398343d7e2da886b" }
+source = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git?rev=14163ef3ce65d197b72e3095ddeb0a39919aa82b#14163ef3ce65d197b72e3095ddeb0a39919aa82b" }
 dependencies = [
     { name = "cartridge" },
     { name = "eidolon-character" },
@@ -117,7 +117,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "eidolon-character-service", git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git?rev=750437ce1ad47899af878e20398343d7e2da886b" },
+    { name = "eidolon-character-service", git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git?rev=14163ef3ce65d197b72e3095ddeb0a39919aa82b" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "openai", specifier = ">=1.30" },
     { name = "pillow", specifier = ">=10.0" },
@@ -127,7 +127,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "eidolon-character", git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git?rev=8f04159ec4710b334b86a825c41b71998083ca34" },
+    { name = "eidolon-character", git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git?rev=fd0f924d39266df5af91a587f0776c9ddde3c053" },
     { name = "httpx" },
     { name = "pytest" },
 ]
@@ -175,8 +175,8 @@ name = "httpcore2"
 version = "2.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/83/a896fc59940fc5a6e2aff3a4be1d92fa890112936803b331cae75a993c34/httpcore2-2.10.0.tar.gz", hash = "sha256:13c0cc3d1919d4f28457f60cd2c2abe04113a8af184ccf1142811beba936f9dc", size = 67427, upload-time = "2026-08-09T09:11:32.123Z" }
 wheels = [
