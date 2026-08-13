@@ -24,4 +24,4 @@ include = ["runtime*", "backend*"]
 # 库升级 = 库仓 commit+push 后更新此处 rev(与顶层子模块指针同源)。
 [tool.uv.sources]
 eidolon-character = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character.git", rev = "8f04159ec4710b334b86a825c41b71998083ca34" }
-eidolon-character-service = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git", rev = "750437ce1ad47899af878e20398343d7e2da886b" }
+eidolon-character-service = { git = "ssh://git@github.com/hakureireimuyo/eidolon-character-service.git", rev = "14163ef3ce65d197b72e3095ddeb0a39919aa82b" }
