@@ -35,7 +35,7 @@ Runtime 是**应用 / 服务**类项目,按 [`docs/environment-isolation.md`](..
 eidolon-runtime/
 ├── 运行时核心               # 与 Web 解耦,可单独测试
 │   ├── 配置模块              # LLM 连接 / 数据目录(环境变量驱动)
-│   ├── 加载层                # 角色卡加载(经 eidolon-character-service 解释器)
+│   ├── 加载层                # 数据解析容器:整包摊平(runtime.resources)+ 按类型标签路由解释
 │   ├── AI 服务层             # 工厂模式；默认 DeepSeek,预留语音/视觉扩展
 │   └── 对话引擎              # system prompt + 历史 + 对话
 ├── Web 后端                  # FastAPI:加载 / 对话 / 静态托管
@@ -61,8 +61,10 @@ pip install -r requirements.txt
 ```
 
 > 协议层、资产类型层与解释器均通过 uv workspace 在 `pyproject.toml`
-> 中声明为正规依赖,无需 `sys.path` 注入。加载角色卡走
-> `eidolon-character-service`(解释器),组合层不直接 import 格式层。
+> 中声明为正规依赖,无需 `sys.path` 注入。加载工程包走数据解析容器
+> `runtime.resources`(打开一次、全量解析),角色数据块经
+> `eidolon-character-service`(解释器)按类型标签路由解释;
+> 组合层不直接 import 格式层。
 
 ### 2. 配置 AI 服务(工厂模式)
 

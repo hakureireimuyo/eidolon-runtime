@@ -409,15 +409,18 @@ class TestEngineIntegration(unittest.TestCase):
             os.unlink(path)
 
     def test_engine_can_load_package_without_character(self):
+        """无角色数据块的包加载成功:角色只是容器中的一个数据对象,缺失不报错。"""
         path = make_package([("world", WORLD_TYPE, {"name": "无人世界"}, "1.0")])
         try:
             eng = RuntimeEngine()
-            with self.assertRaises(CharacterLoadError):
-                eng.load(path)
-            info = eng.load(path, require_character=False)
+            info = eng.load(path)
             self.assertFalse(info["loaded"])
             self.assertEqual(info["package"]["resources"], 1)
             self.assertIsNone(eng.character)
+            self.assertIsNone(eng.bundle)
+            # 对话才要求角色
+            with self.assertRaises(CharacterLoadError):
+                eng.chat("hi")
         finally:
             os.unlink(path)
 

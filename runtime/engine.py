@@ -5,24 +5,32 @@
 - LLMGateway 封装底层 LLM provider 差异(不再直接调 llm_chat)
 
 engine 只负责:
-1. 加载角色卡 → 设置 static 上下文
+1. 加载工程包(经数据解析容器 runtime.resources 打开一次、全量解析)
+   → 取角色资源(容器中按类型标签取到的一个数据对象)→ 设置 static 上下文
 2. 接收用户输入 → 加入对话缓冲
 3. 编译上下文 → 通过 gateway 发送 → 取回回复
 4. 回复加入对话缓冲 → 返回
 
 角色身份 = 模板(永久定义),对话历史 = 运行时状态,二者严格分离。
+包中没有角色数据块时加载照常成功(character=None),仅对话时要求角色。
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from eidolon_character_service import (
-    load_character_file,
     CharacterLoadError,
+    CharacterBundle,
     build_system_prompt,
     character_info as build_character_info,
+)
+from .resources import (
+    CHARACTER_TYPE,
+    ResourceRecord,
+    ResourceSpace,
+    load_package,
 )
 from .llm import LLMUnconfigured, LLMError
 from .llm_gateway import LLMGateway, LLMRequest
@@ -57,7 +65,10 @@ class RuntimeEngine:
         gateway: LLMGateway | None = None,
         context: ContextManager | None = None,
     ) -> None:
+        self.space: Optional[ResourceSpace] = None
+        self.bundle: Optional[CharacterBundle] = None
         self.character = None
+        # 以下均为 space/bundle 的派生兼容视图(backend 与历史调用方继续可用)
         self.assets: dict[str, bytes] = {}
         self.asset_types: dict[str, Optional[str]] = {}
         self.manifest: dict = {}
@@ -74,27 +85,104 @@ class RuntimeEngine:
     # ---- 加载 ----
 
     def load(self, path: str) -> dict:
-        character, assets, manifest = load_character_file(path)
-        self.character = character
-        self.assets = assets
-        self.manifest = manifest
-        self.asset_types = {a.id: a.type for a in character.assets}
+        # 数据解析容器:打开一次、全量解析,角色只是其中一个数据对象
+        try:
+            space = load_package(path)
+        except Exception as exc:  # noqa: BLE001 - 非 Cartridge 包 / 文件不可读
+            raise CharacterLoadError(f"无法打开包:{exc}") from exc
+        self.space = space
 
-        # 将角色 system prompt 设置为静态层上下文
-        system_prompt = build_system_prompt(character)
-        self._context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
+        record = space.first(CHARACTER_TYPE, typed_only=True)
+        self.bundle = (
+            space.context.extras.get("character_bundle")
+            if record is not None
+            else None
+        )
+        self.character = record.value if record is not None else None
+        # 派生兼容视图:媒体字节已在容器内存中,零拷贝
+        self.assets = dict(space.media)
+        self.asset_types = dict(space.media_types)
+        self.manifest = space.manifest
 
-        # 重置对话
+        # 有角色才设置 static 上下文;两分支都重置对话(每次加载都是新会话)
+        if self.character is not None:
+            system_prompt = build_system_prompt(self.character)
+            self._context.set_static(self._TAG_CHARACTER_PROMPT, system_prompt)
         self._context.reset_conversation()
         self.history = []
         return self.character_info()
 
     # ---- 角色卡信息(供前端展示) ----
 
-    def character_info(self) -> dict:
+    def character_info(self, *, include_data: bool = True) -> dict:
         if self.character is None:
-            return {"loaded": False}
-        return build_character_info(self.character)
+            info = {"loaded": False}
+        else:
+            # 优先传自包含 bundle:assets 附带真实字节(base64 data URI 可控开关)
+            info = build_character_info(
+                self.bundle if self.bundle is not None else self.character,
+                include_data=include_data,
+            )
+        info["package"] = self._package_summary()
+        return info
+
+    def _package_summary(self) -> Optional[dict]:
+        if self.space is None:
+            return None
+        return {
+            "id": self.space.id,
+            "name": self.space.name,
+            "resources": len(self.space.records),
+            "media": len(self.space.media),
+        }
+
+    # ---- 容器视图(资源空间:工程包的全部数据对象) ----
+
+    def resource_report(self) -> dict:
+        """当前工程包的资源空间报告(未加载任何包时返回零值报告)。"""
+        if self.space is None:
+            return {
+                "package": {
+                    "id": "",
+                    "name": "",
+                    "container_version": None,
+                    "source": "",
+                },
+                "counts": {
+                    "total": 0,
+                    "usable": 0,
+                    "typed": 0,
+                    "media": 0,
+                    "by_status": {},
+                    "by_kind": {},
+                },
+                "types": {},
+                "resources": [],
+                "media": [],
+            }
+        return self.space.report()
+
+    def create_resource(
+        self,
+        type_value: str,
+        data: Any = None,
+        *,
+        id: Optional[str] = None,
+        version: Optional[str] = None,
+        path: Optional[str] = None,
+        required: bool = False,
+    ) -> ResourceRecord:
+        """在已加载的工程包中动态创建一份资源(容器能力)。"""
+        if self.space is None:
+            raise CharacterLoadError("尚未加载任何包,无法创建资源。")
+        return self.space.create(
+            type_value,
+            data,
+            id=id,
+            version=version,
+            path=path,
+            required=required,
+        )
 
     # ---- 对话历史 ----
 

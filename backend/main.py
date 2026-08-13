@@ -19,6 +19,7 @@ from runtime.engine import RuntimeEngine, CharacterLoadError
 from runtime.llm import LLMUnconfigured, LLMError
 from runtime.llm.config_file import load_llm_config, save_llm_config
 from runtime.config import DATA_ROOT
+from runtime.resources import registry as default_registry
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -136,3 +137,68 @@ def asset(asset_id: str):
         raise HTTPException(status_code=404, detail="资源不存在或该角色未打包此资源字节")
     ctype = engine.asset_types.get(asset_id) or "application/octet-stream"
     return Response(content=data, media_type=ctype)
+
+
+# ---------------------------------------------------------------------------
+# 资源容器 API(工程包 = 多种数据对象的集合,角色只是其中之一)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/resources")
+def list_resources():
+    """当前工程包的全部资源报告(数据对象 + 媒体)。"""
+    report = engine.resource_report()
+    report["loaded"] = engine.character is not None
+    return report
+
+
+@app.get("/api/resources/{resource_id}")
+def get_resource(resource_id: str):
+    """按 id 取一份资源记录(含解释后的值)。"""
+    if engine.space is None:
+        raise HTTPException(status_code=404, detail="尚未加载任何包")
+    record = engine.space.get(resource_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="资源不存在")
+    return record.to_dict(include_value=True)
+
+
+@app.post("/api/resources")
+async def create_resource(payload: dict):
+    """在已加载的工程包中动态创建一份资源。"""
+    type_value = (payload or {}).get("type")
+    if not type_value:
+        raise HTTPException(status_code=400, detail="type 不能为空")
+    try:
+        record = engine.create_resource(
+            type_value, payload.get("data"), id=payload.get("id")
+        )
+    except CharacterLoadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return record.to_dict(include_value=True)
+
+
+@app.post("/api/registry/types")
+def define_type(payload: dict):
+    """运行时动态定义一个资源类型(无需编写 handler 代码)。"""
+    type_value = (payload or {}).get("type")
+    if not type_value:
+        raise HTTPException(status_code=400, detail="type 不能为空")
+    handler = default_registry.define(
+        type_value,
+        version=payload.get("version") or "1.0",
+        required=payload.get("required") or (),
+        defaults=payload.get("defaults"),
+    )
+    return {
+        "ok": True,
+        "type": type_value,
+        "version": handler.version,
+        "name": handler.name,
+    }
+
+
+@app.get("/api/registry")
+def registry_report():
+    """当前资源注册表报告(已注册的处理器与迁移链)。"""
+    return default_registry.report()

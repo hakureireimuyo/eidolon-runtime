@@ -58,13 +58,24 @@ def _install_character(registry: ResourceRegistry) -> bool:
         description="角色身份模块(经 eidolon-character-service 解释)",
     )
     def load_character(data: Any, descriptor: Any, context: Any = None):
-        """把角色数据块解释为类型化 Character 对象。"""
-        character, assets = interpret_character(
-            unwrap(data), getattr(context, "media", None)
+        """把角色数据块解释为自包含 CharacterBundle,挂载内存字节到上下文。"""
+        bundle = interpret_character(
+            unwrap(data),
+            getattr(context, "media", None),
+            manifest=getattr(context, "manifest", None),
+            media_types=getattr(context, "media_types", None),
         )
-        # 把角色声明的媒体字节挂到上下文,供上层按需取用
-        if assets and context is not None:
-            context.extras.setdefault("character_assets", {}).update(assets)
-        return character
+        if context is not None:
+            # 声明资源的真实字节(兼容既有 extras 形态)
+            context.extras.setdefault("character_assets", {}).update(
+                {
+                    aid: ad.data
+                    for aid, ad in bundle.assets.items()
+                    if ad.data is not None
+                }
+            )
+            # 完整内存视图,供上层直接消费真实数据
+            context.extras["character_bundle"] = bundle
+        return bundle.character
 
     return True

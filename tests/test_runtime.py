@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 from eidolon_character.builder import build_seed
-from eidolon_character.model import Character, Dialogue, Identity
+from eidolon_character.model import Character, CharacterAsset, Dialogue, Identity
 from eidolon_character_service import build_system_prompt, CharacterLoadError
 
 from runtime.engine import RuntimeEngine
@@ -75,6 +75,42 @@ class TestRuntime(unittest.TestCase):
             self.assertEqual(info["name"], "TestBot")
             # 资源字节随包载入内存
             self.assertIn("greeting", info)
+            # 自包含内存对象:bundle 与派生视图一致
+            self.assertIsNotNone(eng.bundle)
+            self.assertIs(eng.bundle.character, eng.character)
+            self.assertEqual(eng.manifest, eng.bundle.manifest)
+        finally:
+            os.unlink(path)
+
+    def test_load_character_with_image(self):
+        """图片字节进入内存对象,序列化默认附 base64 data URI(可开关)。"""
+        c = _sample_character()
+        c.assets = [
+            CharacterAsset(id="portrait", type="image/png", purpose="portrait")
+        ]
+        png = b"\x89PNG\r\n\x1a\nfake-bytes"
+        fd, path = tempfile.mkstemp(suffix=".seed")
+        os.close(fd)
+        build_seed(c, images={"portrait": png}, output_path=path)
+        try:
+            eng = RuntimeEngine()
+            info = eng.load(path)
+            # 派生视图:真实字节
+            self.assertEqual(eng.assets["portrait"], png)
+            self.assertEqual(eng.asset_types["portrait"], "image/png")
+            # 自包含内存对象:语义访问器直接取真实数据
+            self.assertEqual(eng.bundle.get_portrait().data, png)
+            # 序列化默认附 base64 data URI
+            portrait = info["assets"][0]
+            self.assertTrue(
+                portrait["data"].startswith("data:image/png;base64,")
+            )
+            self.assertEqual(portrait["size"], len(png))
+            # 开关关闭 → 严格元数据四字段
+            meta = eng.character_info(include_data=False)
+            self.assertEqual(
+                set(meta["assets"][0]), {"id", "type", "purpose", "caption"}
+            )
         finally:
             os.unlink(path)
 
@@ -385,6 +421,66 @@ class TestEngineWithGateway(unittest.TestCase):
             self.assertEqual(len(eng.history), 0)
         finally:
             os.unlink(path)
+
+
+class TestAssetAPI(unittest.TestCase):
+    """/api/asset 字节服务链端到端(经全局 engine)。"""
+
+    def setUp(self):
+        self._cfg = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
+        self._cfg.close()
+        os.environ["EIDOLON_RUNTIME_CONFIG"] = self._cfg.name
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        os.environ.pop("EIDOLON_RUNTIME_CONFIG", None)
+        try:
+            os.unlink(self._cfg.name)
+        except OSError:
+            pass
+
+    def _load_seed_with_portrait(self) -> bytes:
+        c = _sample_character()
+        c.assets = [
+            CharacterAsset(id="portrait", type="image/png", purpose="portrait")
+        ]
+        png = b"\x89PNG\r\n\x1a\napi-bytes"
+        fd, path = tempfile.mkstemp(suffix=".seed")
+        os.close(fd)
+        build_seed(c, images={"portrait": png}, output_path=path)
+        try:
+            with open(path, "rb") as f:
+                r = self.client.post(
+                    "/api/load",
+                    files={
+                        "file": (
+                            "alice.seed",
+                            f.read(),
+                            "application/octet-stream",
+                        )
+                    },
+                )
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.json()["loaded"])
+        finally:
+            os.unlink(path)
+        return png
+
+    def test_asset_endpoint_serves_bundle_bytes(self):
+        png = self._load_seed_with_portrait()
+        # /api/character 默认附 data URI(前端可直接消费真实数据)
+        info = self.client.get("/api/character").json()
+        self.assertTrue(
+            info["assets"][0]["data"].startswith("data:image/png;base64,")
+        )
+        # /api/asset 仍按 id 出真实字节
+        r = self.client.get("/api/asset/portrait")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.content, png)
+        self.assertTrue(r.headers["content-type"].startswith("image/png"))
+
+    def test_asset_endpoint_404(self):
+        self.assertEqual(self.client.get("/api/asset/nope").status_code, 404)
 
 
 if __name__ == "__main__":
