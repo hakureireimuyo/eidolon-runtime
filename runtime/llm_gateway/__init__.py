@@ -8,11 +8,19 @@ eidolon-runtime 通过 LLMGateway 与 LLM 交互,不直接操作 AIService。
 from __future__ import annotations
 
 from .gateway import LLMGateway
-from .types import LLMRequest, LLMResponse, LLMStreamChunk
+from .types import (
+    LLMRequest,
+    LLMResponse,
+    LLMStreamChunk,
+    LLMStreamEvent,
+    ToolCall,
+)
 
 __all__ = [
     "LLMGateway",
     "LLMRequest",
     "LLMResponse",
     "LLMStreamChunk",
+    "LLMStreamEvent",
+    "ToolCall",
 ]

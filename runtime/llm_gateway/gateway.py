@@ -20,13 +20,20 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Iterator
 
 from ..llm.base import AIService
 from ..llm.factory import get_service, _default_factory
 from ..llm.config_file import load_llm_config
-from ..llm.errors import LLMError, LLMUnconfigured
-from .types import LLMRequest, LLMResponse, LLMStreamChunk
+from ..llm.errors import LLMError, LLMUnconfigured, UnsupportedCapability
+from .types import (
+    LLMRequest,
+    LLMResponse,
+    LLMStreamChunk,
+    LLMStreamEvent,
+    ToolCall,
+)
 
 
 class LLMGateway:
@@ -80,14 +87,75 @@ class LLMGateway:
         )
 
     def complete_stream(self, request: LLMRequest) -> Iterator[LLMStreamChunk]:
-        """流式补全(未来扩展)。
+        """流式补全:只产出文本增量分块(兼容接口)。
 
-        当前底层服务尚未实现真正的流式输出,
-        此方法以单个分块返回完整结果,保持接口兼容。
+        工具调用等结构化事件经 stream_events() 消费;底层服务不支持
+        流式时优雅降级为单块完整结果(与旧行为一致)。
+        """
+        for ev in self.stream_events(request):
+            if ev.kind == "text":
+                yield LLMStreamChunk(delta=ev.delta)
+
+    def stream_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
+        """流式事件流:文本增量 + 组装后的完整工具调用 + 结束事件。
+
+        这是 AgentLoop 的消费入口:
+        - 底层服务支持 chat_stream → 逐块透传文本、按 index 组装工具调用片段;
+        - 不支持 → 优雅降级:一次完整文本 + done。
         """
         service = self._resolve_service(request)
-        content = service.chat(request.messages, stream=True)
-        yield LLMStreamChunk(delta=content, finish_reason="stop")
+        try:
+            chunks = service.chat_stream(request.messages, tools=request.tools)
+        except UnsupportedCapability:
+            content = service.chat(request.messages, stream=True)
+            yield LLMStreamEvent(kind="text", delta=content)
+            yield LLMStreamEvent(kind="done", finish_reason="stop")
+            return
+        calls: dict[int, dict] = {}
+        for chunk in chunks:
+            if chunk.kind == "text":
+                yield LLMStreamEvent(kind="text", delta=chunk.delta)
+            elif chunk.kind == "tool_call":
+                acc = calls.setdefault(
+                    chunk.tool_call_index
+                    if chunk.tool_call_index is not None
+                    else 0,
+                    {"id": None, "name": None, "args": ""},
+                )
+                if chunk.tool_call_id:
+                    acc["id"] = chunk.tool_call_id
+                if chunk.tool_call_name:
+                    acc["name"] = chunk.tool_call_name
+                acc["args"] += chunk.delta
+            elif chunk.kind == "finish":
+                if calls:
+                    yield LLMStreamEvent(
+                        kind="tool_calls", tool_calls=self._assemble(calls)
+                    )
+                yield LLMStreamEvent(
+                    kind="done", finish_reason=chunk.finish_reason
+                )
+
+    @staticmethod
+    def _assemble(calls: dict[int, dict]) -> list[ToolCall]:
+        """把按 index 累积的片段组装为完整 ToolCall 列表。"""
+        out: list[ToolCall] = []
+        for idx in sorted(calls):
+            acc = calls[idx]
+            try:
+                args = json.loads(acc["args"]) if acc["args"].strip() else {}
+            except (ValueError, TypeError):
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            out.append(
+                ToolCall(
+                    id=acc["id"] or f"call_{idx}",
+                    name=acc["name"] or "",
+                    arguments=args,
+                )
+            )
+        return out
 
     # ---- 内部 ----
 

@@ -33,6 +33,7 @@ class ContextCompiler:
         self,
         ir: ContextIR,
         conversation: ConversationBuffer | None = None,
+        transient: list[dict] | None = None,
     ) -> list[dict]:
         """编译上下文为 OpenAI 风格 messages 列表。
 
@@ -40,6 +41,8 @@ class ContextCompiler:
         ir: 上下文中间表示(各层 segment)。
         conversation: 对话缓冲区(高频层),其消息追加在 system 之后。
                       传入 None 则不含对话历史。
+        transient: 循环局部消息(tool 调用 / 结果等),拼接在最尾部。
+                   每轮都变,位于变化区末端,不影响前缀缓存;默认无。
 
         返回:[{"role": "system", "content": "..."},
                 {"role": "user", "content": "..."},
@@ -71,6 +74,10 @@ class ContextCompiler:
         # 4. 追加对话历史(高频层,最动态的部分)
         if conversation is not None:
             messages.extend(conversation.to_messages())
+
+        # 5. 追加循环局部 transient(尾部,每轮变化;不入用户可见历史)
+        if transient:
+            messages.extend(transient)
 
         return messages
 

@@ -24,10 +24,41 @@ Runtime 是**应用 / 服务**类项目,按 [`docs/environment-isolation.md`](..
 
 - ✅ 上传并加载角色卡(`.cart` / `.png` / `.zip`),展示角色设定与立绘
 - ✅ 基于角色设定自动构建 system prompt
-- ✅ 调用 AI 模型,进行最基础的一问一答对话(维护上下文历史)
+- ✅ 调用 AI 模型对话(维护上下文历史)
+- ✅ **流式输出**:SSE 事件流逐字渲染,支持加粗 / 斜体样式片段(前端永不见原始占位符号)
+- ✅ **工具调用内循环**:tool calls(LLM 请求 → 引擎执行 → 结果回流再生成,多轮自动循环)
+- ✅ **内嵌占位符协议**(`⟦ ⟧`):只读值注入(`⟦time⟧` / `⟦char:name⟧`)与样式指令(`⟦b:…⟧`),解析后入史即固定
 - ✅ 清空对话 / 重新加载
 
-**不属于 V1**:流式输出、多轮记忆持久化、人格网络推理、世界模拟、导出运行时状态回包。
+**不属于 V1**:多轮记忆持久化、人格网络推理、世界模拟、导出运行时状态回包。
+
+> 设计规范见 [docs/streaming-event-loop-placeholder.md](docs/streaming-event-loop-placeholder.md)。
+> 已知待办:system prompt 尚未注入 `⟦⟧` 语法示例段(规范 §4.1 `inline_syntax`);工具注册表默认为空(协议与循环先行,工具逐步接入)。
+
+### Web API 一览
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/character` | 当前角色卡信息 + 历史(assistant 消息附 `segments` 样式片段) |
+| `POST /api/load` | 上传角色包加载 |
+| `POST /api/chat` | 同步对话(兼容旧接口,内部复用流式路径) |
+| `POST /api/chat/stream` | **流式对话(SSE)** |
+| `POST /api/reset` / `GET /api/characters` / `POST /api/select` | 清空对话 / 角色列表 / 切换会话 |
+| `GET / PUT /api/settings` | 读取 / 写入 LLM 配置 |
+
+`POST /api/chat/stream` 返回 `text/event-stream`(每行 `data: <JSON>`):
+
+| 事件 | payload | 说明 |
+|------|---------|------|
+| `chat.start` | `{session_key}` | 流开始 |
+| `loop.turn` | `{turn, reason}` | 内循环第 N 轮(`start` / `tool_result` / `continue`) |
+| `text.delta` | `{delta, style}` | **解析后**文本增量;`style`: `plain` / `bold` / `italic` |
+| `tool.call` | `{id, name, label, args}` | LLM 请求执行工具 |
+| `tool.result` | `{id, name, ok, error?}` | 执行结果(正文不回显,由模型重新表达) |
+| `chat.done` | `{reply: {text, segments}, history}` | 正常结束(segments 供前端最终同步) |
+| `chat.error` | `{code, message}` | 失败(`not_loaded` / `unconfigured` / `llm_error` / `cancelled` / `max_turns` / `empty_reply`) |
+
+客户端断开连接即取消生成:内循环在检查点退出,已执行工具的世界效果不回滚(程序真实性),只回滚上下文。
 
 ## 目录结构
 
@@ -36,8 +67,12 @@ eidolon-runtime/
 ├── 运行时核心               # 与 Web 解耦,可单独测试
 │   ├── 配置模块              # LLM 连接 / 数据目录(环境变量驱动)
 │   ├── 加载层                # 数据解析容器:整包摊平(runtime.resources)+ 按类型标签路由解释
-│   ├── AI 服务层             # 工厂模式；默认 DeepSeek,预留语音/视觉扩展
-│   └── 对话引擎              # system prompt + 历史 + 对话
+│   ├── AI 服务层             # 工厂模式；默认 DeepSeek(含 chat_stream 流式契约),预留语音/视觉扩展
+│   ├── LLM 网关              # provider 封装:补全 / 流式事件流(tool_call delta 组装)
+│   ├── 内联协议解析层        # runtime.inline:⟦⟧ 占位符(只认语法不认程序,解析失败静默)
+│   ├── 工具层                # runtime.tools:ToolSpec / ToolRegistry
+│   ├── 事件内循环            # runtime.agent_loop:LLM ↔ 工具调度(transient 不入历史)
+│   └── 对话引擎              # system prompt + 历史 + 对话(同步复用流式路径)
 ├── Web 后端                  # FastAPI:加载 / 对话 / 静态托管
 ├── 前端                      # 单页对话界面(暗色,无构建步骤)
 ├── 示例                      # 生成示例角色包
@@ -145,3 +180,6 @@ uv run python -m unittest discover -s tests -t .
 - **协议无知 / 扩展层复用**:运行时完全不感知 `.cart` 内部结构,只消费通用 `Package` 与 `Character`。
 - **运行时状态隔离**:`Character` 是模板,`RuntimeEngine.history` 是会话级可变状态,不回写角色卡。
 - **LLM 可插拔**:对话逻辑与具体模型解耦,换厂商只改环境变量。
+- **LLM 输出 = 事件流**:流式文本 / 工具调用 / 内嵌占位符统一在一条事件流上;解析层(⟦⟧ 协议)只认语法、不认识任何程序,解析失败静默替换;解析后文本入史即固定、永不重解析(前缀缓存友好)。
+- **工具 = 程序接口**:函数调用语义一律走 tool calls;工具消息为循环局部(transient),尾部拼接、不入用户可见历史;错误文本回流模型自行挽救,世界不回滚。
+- **前端只见渲染结果**:前端只消费 `segments`([{text, style}]),原始符号与工具痕迹永不到达前端。

@@ -16,10 +16,15 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ConversationTurn:
-    """一轮对话消息。"""
+    """一轮对话消息。
+
+    content: 解析后纯文本(值已替换、样式剥离)——入史即固定,永不重解析;
+    segments: 解析后带样式片段(前端渲染用),可为 None。
+    """
 
     role: str  # "user" | "assistant"
     content: str
+    segments: list | None = None
     ts: float = field(default_factory=time.time)
 
 
@@ -44,11 +49,13 @@ class ConversationBuffer:
         self._max_turns = max(0, value)
         self._evict()
 
-    def add(self, role: str, content: str) -> ConversationTurn:
+    def add(
+        self, role: str, content: str, segments: list | None = None
+    ) -> ConversationTurn:
         """追加一条消息,返回创建的 turn。"""
         if role not in ("user", "assistant", "system"):
             raise ValueError(f"role 必须是 user/assistant/system,得到 {role!r}")
-        turn = ConversationTurn(role=role, content=content)
+        turn = ConversationTurn(role=role, content=content, segments=segments)
         self._turns.append(turn)
         self._evict()
         return turn

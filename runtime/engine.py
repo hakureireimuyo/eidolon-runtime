@@ -45,10 +45,15 @@ __all__ = ["RuntimeEngine", "ChatMessage", "CharacterLoadError"]
 
 @dataclass
 class ChatMessage:
-    """对话消息(向后兼容的数据结构)。"""
+    """对话消息(向后兼容的数据结构)。
+
+    content 为解析后纯文本(值已替换、样式剥离);segments 为解析后
+    带样式片段(前端渲染用),user 消息恒为 None。
+    """
 
     role: str  # "user" | "assistant"
     content: str
+    segments: Optional[list] = None
     ts: float = field(default_factory=time.time)
 
 
@@ -232,7 +237,16 @@ class RuntimeEngine:
         if self._active_key is not None:
             info["key"] = self._active_key
             info["history"] = [
-                {"role": m.role, "content": m.content} for m in self.history
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    **(
+                        {"segments": m.segments}
+                        if m.segments is not None
+                        else {}
+                    ),
+                }
+                for m in self.history
             ]
         return info
 
@@ -308,12 +322,35 @@ class RuntimeEngine:
             raise CharacterLoadError("尚未加载角色卡,请先加载 .cart / .png。")
         assert self._current_generator is not None  # character 非空 ⇒ 对话生成器存在
         result = self._current_generator.generate({"message": user_message})
-        # 同步 history 镜像(就地重填,保持会话历史列表的引用一致)
-        self.history[:] = [
-            ChatMessage(role=m["role"], content=m["content"])
-            for m in result["history"]
-        ]
+        self._sync_history(result["history"])
         return result
+
+    def chat_stream(self, user_message: str):
+        """流式对话:产出协议事件 dict(SSE 适配层直接序列化)。
+
+        事件:chat.start → loop.turn / text.delta / tool.* / chat.done|error。
+        流结束后历史镜像与生成器上下文同步(无论成功与否)。
+        """
+        if self.character is None:
+            raise CharacterLoadError("尚未加载角色卡,请先加载 .cart / .png。")
+        assert self._current_generator is not None  # character 非空 ⇒ 对话生成器存在
+        yield {"type": "chat.start", "session_key": self._active_key}
+        yield from self._current_generator.generate_stream(
+            {"message": user_message}
+        )
+        # 流结束(成功 / 失败 / 取消):history 镜像就地重填,保持引用一致
+        self._sync_history(self._current_generator.history)
+
+    def _sync_history(self, history: list[dict]) -> None:
+        """把生成器历史镜像同步到会话历史列表(segments 一并携带)。"""
+        self.history[:] = [
+            ChatMessage(
+                role=m["role"],
+                content=m["content"],
+                segments=m.get("segments"),
+            )
+            for m in history
+        ]
 
     # ---- 诊断信息 ----
 

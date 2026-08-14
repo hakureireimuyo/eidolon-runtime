@@ -85,9 +85,11 @@ class ContextManager:
 
     # ---- 对话管理 ----
 
-    def add_message(self, role: str, content: str) -> None:
-        """追加一条对话消息(高频层)。"""
-        self._conversation.add(role, content)
+    def add_message(
+        self, role: str, content: str, segments: list | None = None
+    ) -> None:
+        """追加一条对话消息(高频层);segments 为解析后带样式片段。"""
+        self._conversation.add(role, content, segments=segments)
 
     def reset_conversation(self) -> None:
         """清空对话历史(保留其他层片段不变)。"""
@@ -108,13 +110,14 @@ class ContextManager:
 
     # ---- 编译 ----
 
-    def compile(self) -> list[dict]:
+    def compile(self, transient: list[dict] | None = None) -> list[dict]:
         """编译当前上下文为 OpenAI 风格 messages 列表。
 
         这是 ContextManager 的核心输出——把分层管理的片段 + 对话历史
         编译为 LLM 可消费的 messages,布局为缓存友好(稳定在前,动态在后)。
+        transient 为循环局部消息(tool 调用 / 结果),拼接在最尾部。
         """
-        return self._compiler.compile(self._ir, self._conversation)
+        return self._compiler.compile(self._ir, self._conversation, transient)
 
     def compile_prefix(self) -> str:
         """只编译 system 前缀(static + low + mid 合并)。"""

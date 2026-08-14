@@ -100,6 +100,8 @@
   .composer textarea:focus { outline: none; border-color: var(--accent); }
   .notice { padding: 8px 18px; font-size: 12px; color: var(--danger); background: #2a1416; border-bottom: 1px solid var(--border); }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+  .tool-status { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .msg b, .msg i { color: inherit; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ---- 角色卡悬浮面板(居中,只读展示) ---- */
@@ -288,7 +290,16 @@ function userAvatar() {
   return `<img class="avatar" src="${USER_AVATAR}" alt="我" />`;
 }
 
-function addMessage(role, text) {
+// segments: [{text, style}] → 文本节点(plain / bold / italic)
+function segmentNode(s) {
+  const el = document.createElement(
+    s.style === "bold" ? "b" : s.style === "italic" ? "i" : "span"
+  );
+  el.textContent = s.text;
+  return el;
+}
+
+function addMessage(role, text, segments) {
   if (role !== "user" && role !== "bot") {
     const div = document.createElement("div");
     div.className = "msg sys";
@@ -303,7 +314,12 @@ function addMessage(role, text) {
   row.innerHTML = role === "user"
     ? `<div class="msg user"></div>${userAvatar()}`
     : `${botAvatar()}<div class="msg bot"></div>`;
-  row.querySelector(".msg").textContent = text;
+  const msgEl = row.querySelector(".msg");
+  if (Array.isArray(segments) && segments.length) {
+    for (const s of segments) msgEl.appendChild(segmentNode(s));
+  } else {
+    msgEl.textContent = text;
+  }
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -384,7 +400,7 @@ function renderMessages(info) {
   const history = info.history || [];
   if (history.length) {
     for (const m of history) {
-      addMessage(m.role === "user" ? "user" : "bot", m.content);
+      addMessage(m.role === "user" ? "user" : "bot", m.content, m.segments);
     }
     return;
   }
@@ -433,30 +449,103 @@ $("#fileInput").addEventListener("change", async (e) => {
   }
 });
 
-async function send() {
+// SSE 帧解析:读 data: 行 → JSON 事件
+async function* readSSE(res) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        yield ev;
+      }
+    }
+  }
+}
+
+function send() {
   const text = inputEl.value.trim();
   if (!text) return;
   addMessage("user", text);
   inputEl.value = "";
   sendBtn.disabled = true;
-  const think = addTyping();
-  try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
-    });
-    const data = await res.json();
-    if (!res.ok) { notice("对话失败:" + (data.detail || res.status)); think.remove(); return; }
-    think.remove();
-    addMessage("bot", data.reply);
-  } catch (err) {
-    think.remove();
-    notice("对话失败:" + err.message);
-  } finally {
+  const row = addTyping();
+  const msgEl = row.querySelector(".msg");
+  let segs = [];     // 当前累积片段 [{text, style}]
+  let toolEl = null; // 工具状态行
+  let done = false;
+
+  const render = () => {
+    msgEl.innerHTML = "";
+    for (const s of segs) msgEl.appendChild(segmentNode(s));
+    if (toolEl) msgEl.appendChild(toolEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
+
+  // 事件分派:只渲染解析后内容,原始符号永不到达前端
+  const handle = (ev) => {
+    switch (ev.type) {
+      case "loop.turn": // 内循环轮次(V1 不展示)
+        break;
+      case "text.delta":
+        if (toolEl) { toolEl.remove(); toolEl = null; }
+        const st = ev.style || "plain";
+        const last = segs[segs.length - 1];
+        if (last && last.style === st) last.text += ev.delta;
+        else segs.push({ text: ev.delta, style: st });
+        render();
+        break;
+      case "tool.call":
+        toolEl = document.createElement("div");
+        toolEl.className = "tool-status";
+        toolEl.textContent = "⚙ 正在执行" + (ev.label ? ":" + ev.label : "工具调用…");
+        render();
+        break;
+      case "tool.result":
+        if (!ev.ok && toolEl) toolEl.textContent = "⚠ 工具执行失败:" + (ev.error || ev.name);
+        break;
+      case "chat.done":
+        done = true;
+        if (toolEl) { toolEl.remove(); toolEl = null; }
+        if (ev.reply && Array.isArray(ev.reply.segments)) {
+          segs = ev.reply.segments; // 最终同步(与流式累积一致)
+          render();
+        }
+        if (!segs.length) row.remove();
+        break;
+      case "chat.error":
+        done = true;
+        if (!segs.length) row.remove();
+        notice("对话失败:" + (ev.message || ev.code));
+        break;
+    }
+  };
+
+  fetch("/api/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: text }),
+  }).then(async (res) => {
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || ("HTTP " + res.status));
+    }
+    for await (const ev of readSSE(res)) handle(ev);
+  }).catch((err) => {
+    if (!done) { row.remove(); notice("对话失败:" + err.message); }
+  }).finally(() => {
     sendBtn.disabled = false;
     inputEl.focus();
-  }
+  });
 }
 
 sendBtn.addEventListener("click", send);

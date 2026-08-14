@@ -18,12 +18,15 @@ class LLMRequest:
     """对 LLM 的一次补全请求。
 
     messages: OpenAI 风格消息列表(由 ContextManager 编译产出)。
+    tools: OpenAI 风格工具声明列表(provider 原生 function calling,
+           由 ToolRegistry 转出;None 表示无工具)。
     temperature: 可选,覆盖服务默认温度。
     max_tokens: 可选,覆盖服务默认最大输出长度。
     stream: 是否流式输出(当前默认 False)。
     """
 
     messages: list[dict]
+    tools: list[dict] | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     stream: bool = False
@@ -32,6 +35,7 @@ class LLMRequest:
         """返回一个替换了 messages 的新请求(不可变风格,便于链式调用)。"""
         return LLMRequest(
             messages=messages,
+            tools=self.tools,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             stream=self.stream,
@@ -60,10 +64,35 @@ class LLMResponse:
 
 @dataclass
 class LLMStreamChunk:
-    """流式输出的单个分块(未来扩展用)。"""
+    """流式输出的单个文本分块(兼容接口)。"""
 
     delta: str
     finish_reason: str | None = None
 
     def __iter__(self) -> Iterator[str]:
         yield self.delta
+
+
+@dataclass
+class ToolCall:
+    """一次完整的工具调用(由 provider 流式片段组装而成)。"""
+
+    id: str
+    name: str
+    arguments: dict = field(default_factory=dict)
+
+
+@dataclass
+class LLMStreamEvent:
+    """流式补全的组装后事件(AgentLoop 的消费入口)。
+
+    kind:
+      "text"       文本增量(delta)
+      "tool_calls" 一轮流结束时组装出的完整工具调用列表(tool_calls)
+      "done"       流结束(finish_reason)
+    """
+
+    kind: str
+    delta: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None

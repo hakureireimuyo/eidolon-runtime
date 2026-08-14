@@ -11,8 +11,29 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Iterator
 
 from .errors import UnsupportedCapability
+
+
+@dataclass
+class ProviderChunk:
+    """流式输出的底层分块(provider 无关形态)。
+
+    kind:
+      "text"      文本增量(delta)
+      "tool_call" 工具调用片段(同 tool_call_index 组装;首个片段携带 id / name)
+      "finish"    流结束(finish_reason)
+    思考模式内容(reasoning_content)由服务层丢弃,不进入此契约。
+    """
+
+    kind: str = "text"
+    delta: str = ""
+    tool_call_index: int | None = None
+    tool_call_id: str | None = None
+    tool_call_name: str | None = None
+    finish_reason: str | None = None
 
 
 class AIService(ABC):
@@ -29,6 +50,20 @@ class AIService(ABC):
         messages 为 OpenAI 风格消息列表；content 可为字符串,
         亦可为多模态内容块列表(文本 + 图片),由具体服务决定是否消费。
         """
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+    ) -> Iterator[ProviderChunk]:
+        """流式对话补全(扩展点,默认不支持)。
+
+        产出 ProviderChunk 序列(文本增量 / 工具调用片段 / 结束);
+        tools 为 OpenAI 风格工具声明。未实现流式的服务由 LLMGateway
+        优雅降级为单块返回。
+        """
+        raise UnsupportedCapability("chat_stream", self.name)
 
     # ---- 多模态能力(扩展点,默认不支持) ----
     def transcribe_audio(self, audio: bytes, *, mime: str | None = None) -> str:

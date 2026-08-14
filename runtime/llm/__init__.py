@@ -7,7 +7,7 @@ AIService 基类上的扩展点预留,待实现对应服务后通过工厂注册
 """
 from __future__ import annotations
 
-from .base import AIService
+from .base import AIService, ProviderChunk
 from .deepseek import DeepSeekService
 from .errors import LLMError, LLMUnconfigured, UnsupportedCapability
 from .factory import ServiceFactory, get_service, list_providers, _default_factory
@@ -21,6 +21,7 @@ __all__ = [
     "get_service",
     "list_providers",
     "AIService",
+    "ProviderChunk",
     "DeepSeekService",
     "LLMError",
     "LLMUnconfigured",

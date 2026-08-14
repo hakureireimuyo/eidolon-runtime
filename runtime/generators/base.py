@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Iterator, Optional
 
 from ..context import ContextManager
 from ..llm_gateway import LLMGateway
@@ -50,6 +50,15 @@ class Generator(ABC):
 
         stream 为流式扩展位,本次实现恒为 False。
         """
+
+    def generate_stream(self, payload: dict) -> "Iterator[dict]":
+        """流式生成:输入 payload → 产出协议事件 dict。
+
+        事件类型(loop.turn / text.delta / tool.call / tool.result /
+        chat.done / chat.error)对齐 docs/streaming-event-loop-placeholder.md
+        §3.1。默认未实现(子类按需覆写),不破坏同步契约。
+        """
+        raise NotImplementedError("流式生成尚未实现")
 
     @property
     def context(self) -> ContextManager:

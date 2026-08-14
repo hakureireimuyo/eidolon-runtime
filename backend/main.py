@@ -7,12 +7,14 @@
 """
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import iterate_in_threadpool
 
 from runtime import engine as engine_mod  # noqa: F401  (确保包被导入)
 from runtime.engine import RuntimeEngine, CharacterLoadError
@@ -78,6 +80,47 @@ async def chat(payload: dict):
         raise HTTPException(status_code=503, detail=str(exc))
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(payload: dict):
+    """流式对话:SSE 事件流。
+
+    事件(对齐 docs/streaming-event-loop-placeholder.md §3.1):
+      chat.start / loop.turn / text.delta / tool.call / tool.result /
+      chat.done / chat.error。
+    事件信封与传输无关(未来 WebSocket 复用同一套事件类型);
+    客户端断开连接即取消生成(内循环在检查点退出)。
+    """
+    message = (payload or {}).get("message", "")
+    if not message or not message.strip():
+        raise HTTPException(status_code=400, detail="message 不能为空")
+
+    def _sse(ev: dict) -> str:
+        return f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    async def gen():
+        try:
+            async for ev in iterate_in_threadpool(engine.chat_stream(message)):
+                yield _sse(ev)
+        except CharacterLoadError as exc:
+            yield _sse(
+                {"type": "chat.error", "code": "not_loaded", "message": str(exc)}
+            )
+        except LLMUnconfigured as exc:
+            yield _sse(
+                {"type": "chat.error", "code": "unconfigured", "message": str(exc)}
+            )
+        except LLMError as exc:
+            yield _sse(
+                {"type": "chat.error", "code": "llm_error", "message": str(exc)}
+            )
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/reset")
