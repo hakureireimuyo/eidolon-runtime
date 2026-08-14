@@ -1,0 +1,4 @@
+# 强制 shell 脚本始终以 LF 检出(CRLF 会导致 bash 解析失败,如 set -o pipefail 报错)
+*.sh text eol=lf
+# bat 启动器必须 CRLF(cmd.exe 解析 LF-only 批处理可能出错)
+*.bat text eol=crlf

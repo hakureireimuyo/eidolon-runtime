@@ -15,8 +15,15 @@
 # 开发者工具默认开启(/devtools);如需关闭:EIDOLON_RUNTIME_DEVTOOLS=0 bash scripts/start.sh
 #
 # 依赖:uv。首次运行自动创建本仓 .venv 并安装依赖(git 源 pin rev,见 README);
+#      脚本强制使用仓内 .venv,已激活的外部环境(如 conda)不影响启动;
 #      本脚本在 monorepo 检出与独立 clone 两种形态下均可直接使用。
 set -euo pipefail
+
+# Windows 下 PowerShell 直接敲 bash 会进入 WSL bash(路径/端口/进程检测全错),显式拒绝
+if [ -r /proc/version ] && grep -qi microsoft /proc/version; then
+    echo "[runtime] 检测到 WSL bash——请使用 Git Bash 运行(右键目录 Git Bash Here,或 VSCode 终端选择 Git Bash 配置)"
+    exit 1
+fi
 
 # 仓库根:优先 git 推导(monorepo 检出与独立 clone 均正确),非 git 环境回退脚本目录
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
@@ -108,8 +115,11 @@ start() {
     : >"$LOG_DIR/runtime.log"
 
     echo "[runtime] 启动服务:$URL(日志:$LOG_DIR/runtime.log)"
+    # 强制使用仓内 .venv:清除 VIRTUAL_ENV/CONDA_PREFIX,避免 uv 误用激活的外部环境
     (cd "$REPO" && EIDOLON_RUNTIME_DEVTOOLS="${EIDOLON_RUNTIME_DEVTOOLS:-1}" \
-        exec uv run uvicorn backend.main:app --host 127.0.0.1 --port "$PORT") \
+        env -u VIRTUAL_ENV -u CONDA_PREFIX -u CONDA_DEFAULT_ENV \
+            UV_PROJECT_ENVIRONMENT="$REPO/.venv" \
+            uv run uvicorn backend.main:app --host 127.0.0.1 --port "$PORT") \
         >>"$LOG_DIR/runtime.log" 2>&1 &
     PID=$!
 
