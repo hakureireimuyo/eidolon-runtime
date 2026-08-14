@@ -1,0 +1,97 @@
+# 架构演化路线:从对话循环到事件循环
+
+> 本文档归纳**当前实现与目标架构之间的差距**,并给出分阶段的迭代路线。路线按"依赖顺序 + 风险前置"排序,而不是按文档章节平铺展开;每一步遵循同一原则:**先在最小可控范围内验证契约形状,再扩大范围、拆分边界**。
+> 相关文档:[运行时核心设计](./runtime-core-design.md) · [引擎核心:上下文流动的管理者](./engine-core.md) · [状态模型、上下文管理与缓存](./state-and-context.md) · [多智能体与多模态](./multi-agent-multimodal.md) · [上下文分层管理](./context-management.md)
+
+## 1. 现状:RuntimeEngine 是一个请求-响应式对话循环
+
+当前 `RuntimeEngine` 的职责:加载角色包 → 为每个角色建一个 `Session`(挂一个 `DialogueGenerator`)→ `chat()` 把用户消息转发给当前会话的生成器 → 拿到回复后同步 `history`。
+
+`Session` 只是"角色模板 + 生成器集合 + 独立历史"的容器,`generators` 字典目前只被填入唯一的 `DialogueGenerator`。
+
+这本质上是**请求-响应式的对话循环**:用户发一句话,引擎转发给生成器,生成器调 LLM,返回文本。还不存在:
+
+- 独立于用户输入的"心跳"/tick;
+- Event、State Store;
+- 多 Processor 并发读写状态;
+- 主动触发(proactive)机制。
+
+### 已具备的基础(必要前置条件)
+
+代码层面已把 LLM 调用和上下文管理拆成两个独立抽象层——`LLMGateway` 与 `ContextManager`(含 IR / Compiler / Buffer),`RuntimeEngine` 不再直接拼 messages 或调 LLM;生成器层已有 `Generator` 抽象基类,每个生成器自管理自己的 `ContextManager`。
+
+这一步是事件循环往前推进的必要前提:后面所有的 Event / State / Processor 概念都要挂在"生成器输入输出如何流动"这条线上,而这条线现已打通。
+
+## 2. 目标:文档描述的"虚拟程序世界事件循环"
+
+[运行时核心设计](./runtime-core-design.md) 与 [引擎核心:上下文流动的管理者](./engine-core.md) 描述的目标架构与现状是两回事:
+
+1. **组合层 vs 能力子项目分离**:`eidolon-runtime` 只做 Extension Registry + Context Compiler + Web/UI;领域逻辑(人格 `eidolon-mind`、世界规则 `eidolon-world`、记忆 `eidolon-memory`)是独立子项目被 import,而不是内聚在 runtime 里。
+2. **State / Event / Processor 循环**:真正的事件循环是 `Event → Registry 分发 → 各 Processor 读取/写入 State → Compiler 收集 → 生成输出`;子项目之间不直接调用,只通过共享 State Store 和 Event Bus 通信。
+3. **引擎是数据流动的编排者,不是对话转发器**:引擎的核心契约是双向的——程序产生结构化结果注入生成器;生成器/LLM 产生的意图也要能路由回程序去验证(比如"角色想开门"要经程序判定门是否存在/上锁,再把客观事实回流进上下文),而不是 LLM 说什么就是什么。
+4. **Awareness Layer / Scheduler**:要从被动聊天机器人演化为自主智能体,还需要 Planner + Scheduler 层,能在没有用户输入的情况下(比如"3 天未上线"这类世界事件)主动触发生成动作。这是"事件循环"里 tick 驱动部分的核心,目前完全不存在于 `runtime/engine.py`。
+
+## 3. 差距总结
+
+| 维度 | 当前实现 | 目标架构 |
+|------|---------|---------|
+| 驱动方式 | 用户消息触发 `chat()`,纯请求-响应 | Event Bus + tick,可无用户输入自主运行 |
+| 状态管理 | 生成器内部的 `ContextManager`(对话历史/上下文分层) | 独立于生成器的 State Store,多 Processor 读写不同状态域 |
+| 领域逻辑位置 | 无(人格/世界/记忆逻辑尚未落地) | 独立子项目 `eidolon-mind` / `eidolon-world` / `eidolon-memory` |
+| 生成器数量 | 仅 `DialogueGenerator` 一种 | 对话/剧情/环境/表情/图像等多生成器交叉组合 |
+| LLM 角色 | 唯一的信息来源和决策者 | 仅作"渲染器",真实性由程序状态决定 |
+| 反向控制流 | 不存在(LLM 输出即最终回复) | LLM 意图需路由回程序验证后再回流上下文 |
+
+这个差距是**符合预期**的:[运行时核心设计](./runtime-core-design.md) 明确记录这是"已剔除被推翻方案后的最终架构决策",即当前实现对应文档中提到并已被否定的"eidolon-runtime 作为唯一运行时内核、领域逻辑全部内聚"的早期形态,只是还没有按新设计重构。
+
+## 4. 迭代路线:六个阶段
+
+| 阶段 | 目标 | 验证点 |
+|------|------|--------|
+| 一 | 单进程内立起 State/Event 骨架 | 单一能力下 `Event → Processor → State → Compiler → 生成` 循环跑通 |
+| 二 | 引入第二个生成器 + 分层上下文 | 多 Processor 围绕共享状态**协同**而非流水线接力 |
+| 三 | 打通反向控制流 | "LLM 意图 → 程序判定 → 事实回流"契约形状正确 |
+| 四 | 拆独立子项目 + Extension Registry | 能力以 git 源依赖被 import,加载/卸载契约成立 |
+| 五 | Scheduler/Planner 主动触发 | 无用户输入也能在 tick 上检测状态变化并生成 |
+| 六 | 多模态生成接入状态投影 | 生成由状态触发,生成结果作为状态落地 |
+
+### 4.1 第一阶段:单进程内先把 State/Event 骨架立起来,不急着拆子项目
+
+在 `eidolon-runtime` 内部(还不拆 `eidolon-mind` / `eidolon-world` / `eidolon-memory`)先实现一个最小的 State Store + Event Bus,把现在"用户消息 → chat() → 生成器 → 回复"这条同步调用链,改造成"用户输入 = 一种 Event → 分发 → DialogueGenerator 作为一个 Processor 读写 State → Context Compiler 从 State 收集 → 生成"。
+
+目的不是做出多智能体,而是先验证 `Event → Registry 分发 → Processor 读写 State → Compiler 收集 → 生成输出` 这个循环本身在**单一能力**下能跑通。
+
+理由:"共享状态,而非共享 Prompt"是核心决策之一——如果一开始就把领域逻辑拆进独立子项目,会在架构本身还没验证前就承担跨项目调试成本。
+
+### 4.2 第二阶段:引入第二个生成器 + 状态驱动的分层上下文
+
+在 Event/State 骨架跑通后,加入第二个生成器(比如 Emotion Agent 或 Environment Agent),验证"多个 Processor 围绕共享状态协同"而不是流水线接力。同时把 [上下文分层管理](./context-management.md) 描述的静态/低频/中频/高频四层上下文落地为真实的 `ContextManager` 分层缓存策略,而不只是概念。
+
+### 4.3 第三阶段:打通反向控制流(LLM 意图 → 程序验证 → 事实回流)
+
+这是当前差距最大的部分——现在 LLM 输出即最终回复,没有"意图路由回程序验证"这一环。需要给引擎加一条"生成器 → 引擎 → 程序判定 → 引擎 → 生成器"的回路;哪怕程序侧先用最简单的规则判定(比如一个假的"世界状态字典"),目的是**验证契约形状**,而不是先做复杂的世界模拟。
+
+### 4.4 第四阶段:把验证过的能力拆成独立子项目,正式建立 Extension Registry
+
+前三阶段都在单进程里验证概念形状;等 State/Event/Processor/反向控制流这套契约稳定了,再把其中一个能力拆成真正的独立子项目,通过 git 源依赖被 `eidolon-runtime` import,同时实现 Extension Registry 的加载/卸载契约。
+
+建议从 `eidolon-memory` 开始(记忆压缩相对独立、副作用小)。这一步放在后面而不是最开始,是因为"先拆分再实现"容易在接口还没跑通前就锁死接口形状,导致返工。
+
+### 4.5 第五阶段:Scheduler/Planner——从被动响应到主动触发
+
+有了稳定的 State/Event 循环后,再加一层"意识/觉知"判断——不依赖用户输入也能在 tick 上检测状态变化并主动触发生成(如"用户 3 天未上线 → 角色应表现在意")。这一层依赖前面所有阶段的状态基础设施已经存在,是**最后才有意义实现**的部分,也是文档中标注的"可选方向"。
+
+### 4.6 第六阶段:多模态生成接入状态投影
+
+图片/语音等生成能力接入"状态触发"而非"LLM 决定生成",生成结果本身作为状态而不是最终产物落地(见 [多智能体与多模态](./multi-agent-multimodal.md) 的"昂贵行动者"原则)。这是最上层、最后做的能力扩展,因为它依赖前面 Planner/Scheduler 判断"是否值得触发昂贵生成"的机制。
+
+## 5. 排序背后的原则
+
+每一步都遵循"先在最小可控范围内验证契约形状,再扩大范围/拆分边界":
+
+1. 先在**单进程、单能力**下跑通 State/Event/Processor 循环;
+2. 再加第二个能力,验证"协同"而非"接力";
+3. 再验证反向控制流;
+4. 最后才谈拆分子项目、主动触发和多模态。
+
+如果颠倒顺序(比如先拆 4 个子项目再补 Event Bus),会在跨项目边界还没验证前就固化接口,返工成本更高。这与 [运行时核心设计](./runtime-core-design.md) "被推翻的架构"一节列出的教训(先内聚验证、再抽象拆分)方向一致。
