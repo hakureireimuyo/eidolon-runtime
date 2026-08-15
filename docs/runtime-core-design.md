@@ -1,7 +1,7 @@
 # 运行时核心设计
 
 > 本文档记录引擎运行时层的**最终架构决策**(已剔除"集中式大脑""Prompt Builder"等被推翻方案)。
-> 相关文档:[引擎核心:上下文流动的管理者](./engine-core.md) · [状态模型、上下文管理与缓存](./state-and-context.md) · [多智能体与多模态系统](./multi-agent-multimodal.md)(另见:核心架构哲学与项目定位、独立项目职责与能力边界)
+> 相关文档:[引擎核心:上下文流动的管理者](./engine-core.md) · [状态模型、上下文管理与缓存](./state-and-context.md) · [多智能体与多模态系统](./multi-agent-multimodal.md) · [演化路线](./evolution-roadmap.md)(另见:核心架构哲学与项目定位、独立项目职责与能力边界;图运行时内核设计见 `eidolon-graph` 仓库 `docs/`)
 
 ## 1. 运行时层的项目结构
 
@@ -10,12 +10,24 @@
 ```
 runtime/
 ├── eidolon-runtime/         ← 组合层:Web 服务 + UI + Extension Registry + Context Compiler
+├── eidolon-graph/           ← 图运行时内核:图模型 + 执行引擎 + 内置节点(§1.1)
 ├── eidolon-mind/            ← 独立项目:人格偏置矩阵(纯库,被 eidolon-runtime import)
 ├── eidolon-world/           ← 独立项目:世界规则运行(纯库,被 eidolon-runtime import)
 └── eidolon-memory/          ← 独立项目:记忆压缩系统(纯库,被 eidolon-runtime import)
 ```
 
 **eidolon-runtime 只做组合和 UI**。它不包含领域逻辑——人格建模归 eidolon-mind、世界推演归 eidolon-world、记忆管理归 eidolon-memory。各子项目独立发版,在 eidolon-runtime 中作为第三方库被 import 引用。
+
+### 1.1 图运行时内核(eidolon-graph):编辑与运行共享的内核
+
+图运行时的工程组织与既有资产模式有本质区别,记录如下:
+
+- **为什么不是纯数据容器**:角色资产是纯数据,静态 schema 校验足够,编辑器与运行时共享 asset-types 即可;图资产不是——校验是语义性的(绑定存在性、交叉连线、类型兼容、就绪语义、屏蔽语义),编辑事务需要**执行**状态迁移(改连线→就绪重置、换实现→迁移函数),预览需要**真正运行**图。因此生产方(图编辑服务)与消费方(eidolon-runtime)**共享同一个图运行时内核**,而不是各自基于一份 schema 实现——否则编辑器一份校验器、运行时一份校验器,语义必然漂移。
+- **编辑器内嵌引擎**:与 Unity / Unreal 编辑器直接运行引擎本体同构。eidolon-studio 调用的图编辑服务基于内核运行 headless 实例做预览、校验与编辑事务;预览是确定性可复现的(同步轮次 + RNG seed),编辑器天然是调试器。
+- **内核纯度**:内核零第三方依赖,不含 LLM / 网络 / UI。节点由宿主注册——编辑器注入 stub 做预览,eidolon-runtime 注册 LLM 节点 / Context Compiler 节点 / 工具节点等真实实现;内核内置节点仅 Clock / Counter / Comparator / AND / OR / NOT / Switch / Latch / Timer 等逻辑元件,领域节点一律不进内核。
+- **内核内部两层**:model(图模型 + 资产格式 + 静态校验 + 内核版本标记)与 engine(tick 执行、调度、快照/持久化、RNG、编辑事务与状态迁移);编辑事务 API 属于内核,编辑服务只是它的 UI;图资产记录写入时的内核版本,编辑/加载时比对。
+- **稳定核心**即 Node / Port / Signal / State / Graph / Tick / Asset / Snapshot 八个概念;内核设计文档已随仓库迁移至 `eidolon-graph` 仓库 `docs/`(总纲 / 执行模型 / 端口绑定 / 节点类型 / 资产 / 持久化与编辑 / 工程组织);内核的落地顺序是"阶段零:最小验证闭环"(见 `eidolon-graph` 仓库 `docs/graph-kernel-engineering.md` 与 [演化路线](./evolution-roadmap.md) §4.0)。
+- **依赖方式沿用既有约定**:git 源 + pin rev——eidolon-runtime 与图编辑服务(editor 侧,由 eidolon-studio 调用)分别 pin 同一个内核,monorepo 与独立 clone 一致,无路径耦合。
 
 ## 2. eidolon-runtime 自身的职责
 
